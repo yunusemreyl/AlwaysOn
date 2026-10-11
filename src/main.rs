@@ -232,9 +232,14 @@ unsafe fn toggle_autostart() {
             let _ = RegDeleteValueW(hkey, w!("AlwaysOn"));
         } else {
             let mut path = [0u16; 1024];
-            let len = GetModuleFileNameW(None, &mut path);
-            let byte_len = (len + 1) * 2;
-            let _ = RegSetValueExW(hkey, w!("AlwaysOn"), 0, REG_SZ, Some(std::slice::from_raw_parts(path.as_ptr() as *const u8, byte_len as usize)));
+            let len = GetModuleFileNameW(None, &mut path) as usize;
+            // Wrap in quotes so paths containing spaces launch correctly at startup
+            let mut quoted: Vec<u16> = Vec::with_capacity(len + 3);
+            quoted.push(b'"' as u16);
+            quoted.extend_from_slice(&path[..len]);
+            quoted.push(b'"' as u16);
+            quoted.push(0);
+            let _ = RegSetValueExW(hkey, w!("AlwaysOn"), 0, REG_SZ, Some(std::slice::from_raw_parts(quoted.as_ptr() as *const u8, quoted.len() * 2)));
         }
         let _ = RegCloseKey(hkey);
     }
