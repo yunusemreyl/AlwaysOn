@@ -7,6 +7,10 @@ A lightweight, native Windows 11 utility built in pure Rust + Win32 APIs to **ke
 
 If you are downloading large files, rendering builds/videos, or reading without touching your keyboard and mouse, **AlwaysOn** sits quietly in the system tray and prevents sleep with minimal memory and zero idle CPU overhead.
 
+<div align="center">
+  <img src="assets/screenshot.png" width="760" alt="AlwaysOn Control Panel Preview">
+</div>
+
 ## Features
 - **WinUI 3 Fluent Control Panel**: Native bottom-right flyout built directly with Win32 + DWM `Mica Alt`, `Segoe UI Variable` typography, `Segoe Fluent Icons`, SDF anti-aliased `SettingsCard` surfaces, pearl-white 3D squircle branding, and Fluent `SelectorBar` / `ToggleSwitch` controls.
 - **Light, Dark & System Theme Modes**: Automatically follows Windows' `AppsUseLightTheme` setting (including live `WM_SETTINGCHANGE` updates) or lets you explicitly select **Light** (`Açık`) or **Dark** (`Koyu`) mode with matching DWM frame styling and palettes.
