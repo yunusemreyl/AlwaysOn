@@ -43,7 +43,7 @@ const IDM_EXIT: usize = 1006;
 const IDM_30M: usize = 1007;
 
 const UI_LOGICAL_W: i32 = 360;
-const UI_LOGICAL_H: i32 = 304;
+const UI_LOGICAL_H: i32 = 320;
 
 const MUG_ICON_DIM: usize = 72;
 const MUG_AWAKE_RGBA: &[u8] = include_bytes!("../assets/mug_awake.rgba");
@@ -63,6 +63,9 @@ const HIT_BTN_SETTINGS: usize = 10;
 const HIT_BTN_BACK: usize = 11;
 const HIT_CLOSE_TO_TRAY: usize = 12;
 const HIT_CLOSE_EXIT: usize = 13;
+const HIT_LANG_SYSTEM: usize = 14;
+const HIT_LANG_TR: usize = 15;
+const HIT_LANG_EN: usize = 16;
 
 const RUN_KEY_PATH: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const STARTUP_APPROVED_PATH: PCWSTR =
@@ -71,6 +74,7 @@ const APP_REG_NAME: PCWSTR = w!("AlwaysOn");
 const SETTINGS_KEY_PATH: PCWSTR = w!("Software\\AlwaysOn");
 const REG_CLOSE_TO_TRAY: PCWSTR = w!("CloseToTray");
 const REG_KEEP_DISPLAY_ON: PCWSTR = w!("KeepDisplayOn");
+const REG_LANGUAGE: PCWSTR = w!("Language");
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum Mode {
@@ -81,12 +85,20 @@ enum Mode {
     Timer3H,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum LangPref {
+    System = 0,
+    Turkish = 1,
+    English = 2,
+}
+
 struct AppState {
     mode: Mode,
     hicon_awake: HICON,
     hicon_sleep: HICON,
     hicon_hero_awake: HICON,
     hicon_hero_sleep: HICON,
+    lang_pref: LangPref,
     lang_tr: bool,
     wm_taskbar_created: u32,
     keep_display_on: bool,
@@ -104,6 +116,7 @@ struct AppState {
     anim_mode_idx: f32,
     anim_mode_alpha: f32,
     anim_close_opt: f32,
+    anim_lang_idx: f32,
     anim_view_slide: f32,
     anim_open_progress: f32,
     target_win_x: i32,
@@ -116,6 +129,7 @@ static mut STATE: AppState = AppState {
     hicon_sleep: HICON(std::ptr::null_mut()),
     hicon_hero_awake: HICON(std::ptr::null_mut()),
     hicon_hero_sleep: HICON(std::ptr::null_mut()),
+    lang_pref: LangPref::System,
     lang_tr: false,
     wm_taskbar_created: 0,
     keep_display_on: true,
@@ -133,6 +147,7 @@ static mut STATE: AppState = AppState {
     anim_mode_idx: 0.0,
     anim_mode_alpha: 1.0,
     anim_close_opt: 0.0,
+    anim_lang_idx: 0.0,
     anim_view_slide: 0.0,
     anim_open_progress: 1.0,
     target_win_x: 0,
@@ -531,9 +546,57 @@ unsafe fn write_reg_dword(name: PCWSTR, val: u32) {
     }
 }
 
+fn lang_pref_from_dword(val: u32) -> LangPref {
+    match val {
+        1 => LangPref::Turkish,
+        2 => LangPref::English,
+        _ => LangPref::System,
+    }
+}
+
+fn lang_to_index(pref: LangPref) -> f32 {
+    match pref {
+        LangPref::System => 0.0,
+        LangPref::Turkish => 1.0,
+        LangPref::English => 2.0,
+    }
+}
+
+fn system_is_turkish() -> bool {
+    unsafe { (GetUserDefaultUILanguage() & 0x3FF) == 0x1F }
+}
+
+fn resolve_lang_tr(pref: LangPref, sys_is_tr: bool) -> bool {
+    match pref {
+        LangPref::System => sys_is_tr,
+        LangPref::Turkish => true,
+        LangPref::English => false,
+    }
+}
+
+fn app_window_title(lang_tr: bool) -> PCWSTR {
+    if lang_tr {
+        w!("AlwaysOn Kontrol Paneli")
+    } else {
+        w!("AlwaysOn Control Panel")
+    }
+}
+
+unsafe fn set_language_pref(hwnd: HWND, pref: LangPref) {
+    STATE.lang_pref = pref;
+    STATE.lang_tr = resolve_lang_tr(pref, system_is_turkish());
+    write_reg_dword(REG_LANGUAGE, pref as u32);
+    let _ = SetWindowTextW(hwnd, app_window_title(STATE.lang_tr));
+    update_tray_tooltip_only(hwnd);
+    start_ui_anim(hwnd);
+    let _ = InvalidateRect(hwnd, None, false);
+}
+
 unsafe fn load_app_settings() {
     STATE.close_to_tray = read_reg_dword(REG_CLOSE_TO_TRAY, 1) != 0;
     STATE.keep_display_on = read_reg_dword(REG_KEEP_DISPLAY_ON, 1) != 0;
+    STATE.lang_pref = lang_pref_from_dword(read_reg_dword(REG_LANGUAGE, 0));
+    STATE.lang_tr = resolve_lang_tr(STATE.lang_pref, system_is_turkish());
     STATE.autostart_cached = is_autostart();
     sync_anim_immediately();
 }
@@ -570,6 +633,7 @@ unsafe fn sync_anim_immediately() {
     STATE.anim_mode_idx = mode_to_index(STATE.mode, 0.0);
     STATE.anim_mode_alpha = if STATE.mode != Mode::Off { 1.0 } else { 0.0 };
     STATE.anim_close_opt = if STATE.close_to_tray { 0.0 } else { 1.0 };
+    STATE.anim_lang_idx = lang_to_index(STATE.lang_pref);
     STATE.anim_view_slide = 0.0;
     STATE.anim_open_progress = 1.0;
 }
@@ -591,6 +655,7 @@ unsafe fn step_ui_anim(hwnd: HWND) {
     let mode_idx_target = mode_to_index(STATE.mode, STATE.anim_mode_idx);
     let mode_alpha_target = if STATE.mode != Mode::Off { 1.0 } else { 0.0 };
     let close_opt_target = if STATE.close_to_tray { 0.0 } else { 1.0 };
+    let lang_idx_target = lang_to_index(STATE.lang_pref);
 
     let mut hero_val = STATE.anim_hero_toggle;
     any_changed |= lerp_step(&mut hero_val, hero_target, speed);
@@ -615,6 +680,10 @@ unsafe fn step_ui_anim(hwnd: HWND) {
     let mut close_val = STATE.anim_close_opt;
     any_changed |= lerp_step(&mut close_val, close_opt_target, speed);
     STATE.anim_close_opt = close_val;
+
+    let mut lang_val = STATE.anim_lang_idx;
+    any_changed |= lerp_step(&mut lang_val, lang_idx_target, speed);
+    STATE.anim_lang_idx = lang_val;
 
     let mut view_val = STATE.anim_view_slide;
     any_changed |= lerp_step(&mut view_val, 0.0, speed);
@@ -950,12 +1019,18 @@ fn hit_test_ui(lx: i32, ly: i32) -> usize {
     if in_settings {
         if in_rect(lx, ly, 12, 5, 32, 28) {
             HIT_BTN_BACK
-        } else if in_rect(lx, ly, 16, 66, 328, 62) {
+        } else if in_rect(lx, ly, 16, 58, 328, 52) {
             HIT_TOGGLE_AUTOSTART
-        } else if in_rect(lx, ly, 32, 228, 146, 38) {
+        } else if in_rect(lx, ly, 32, 166, 146, 32) {
             HIT_CLOSE_TO_TRAY
-        } else if in_rect(lx, ly, 182, 228, 146, 38) {
+        } else if in_rect(lx, ly, 182, 166, 146, 32) {
             HIT_CLOSE_EXIT
+        } else if in_rect(lx, ly, 32, 264, 96, 32) {
+            HIT_LANG_SYSTEM
+        } else if in_rect(lx, ly, 132, 264, 96, 32) {
+            HIT_LANG_TR
+        } else if in_rect(lx, ly, 232, 264, 96, 32) {
+            HIT_LANG_EN
         } else {
             HIT_NONE
         }
@@ -1296,6 +1371,123 @@ unsafe fn draw_glass_text(
     }
 }
 
+struct SettingsSelectorSpec<'a> {
+    section_title: &'a str,
+    section_y: i32,
+    card_y: f32,
+    glyph: &'a str,
+    status_text: &'a str,
+    anim_idx: f32,
+    step_x: f32,
+    pill_w: f32,
+    accent_w: f32,
+    opts: &'a [(usize, bool, f32, &'a str)],
+}
+
+#[allow(clippy::too_many_arguments)]
+unsafe fn draw_settings_selector(
+    canvas: &mut SdfCanvas<'_>,
+    text_dc: HDC,
+    text_buf: &mut [u32],
+    dpi: i32,
+    vx_i: i32,
+    hover: usize,
+    font_section: HFONT,
+    font_fluent_gear: HFONT,
+    font_sub: HFONT,
+    font_body: HFONT,
+    font_body_bold: HFONT,
+    spec: &SettingsSelectorSpec<'_>,
+) {
+    let vx = vx_i as f32;
+    let card_yi = spec.card_y as i32;
+    draw_glass_text(
+        canvas,
+        text_dc,
+        text_buf,
+        spec.section_title,
+        18 + vx_i,
+        spec.section_y,
+        260,
+        16,
+        dpi,
+        font_section,
+        [158, 158, 158],
+        1.0,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+    );
+
+    canvas.draw_round_card(16.0 + vx, spec.card_y, 328.0, 74.0, 8.0, [43, 43, 43], 1.0, [58, 58, 58], 1.0);
+    draw_glass_text(
+        canvas,
+        text_dc,
+        text_buf,
+        spec.glyph,
+        28 + vx_i,
+        card_yi + 6,
+        24,
+        20,
+        dpi,
+        font_fluent_gear,
+        [224, 224, 224],
+        1.0,
+        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+    );
+    draw_glass_text(
+        canvas,
+        text_dc,
+        text_buf,
+        spec.status_text,
+        56 + vx_i,
+        card_yi + 6,
+        276,
+        18,
+        dpi,
+        font_sub,
+        [96, 205, 255],
+        1.0,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+    );
+
+    canvas.draw_round_card(28.0 + vx, spec.card_y + 28.0, 304.0, 40.0, 6.0, [32, 32, 32], 1.0, [54, 54, 54], 1.0);
+    for &(hid, selected, ox, _) in spec.opts {
+        if hover == hid && !selected {
+            canvas.draw_round_card(ox + vx, spec.card_y + 32.0, spec.pill_w, 32.0, 5.0, [46, 46, 46], 1.0, [46, 46, 46], 0.0);
+        }
+    }
+    let active_x = 32.0 + spec.anim_idx * spec.step_x + vx;
+    canvas.draw_round_card(active_x, spec.card_y + 32.0, spec.pill_w, 32.0, 5.0, [56, 56, 56], 1.0, [70, 70, 70], 1.0);
+    canvas.draw_round_card(
+        active_x + (spec.pill_w - spec.accent_w) * 0.5,
+        spec.card_y + 60.5,
+        spec.accent_w,
+        2.5,
+        1.25,
+        [76, 194, 255],
+        1.0,
+        [76, 194, 255],
+        0.0,
+    );
+
+    for &(_, selected, ox, label) in spec.opts {
+        draw_glass_text(
+            canvas,
+            text_dc,
+            text_buf,
+            label,
+            ox as i32 + vx_i,
+            card_yi + 31,
+            spec.pill_w as i32,
+            29,
+            dpi,
+            if selected { font_body_bold } else { font_body },
+            if selected { [255, 255, 255] } else { [196, 196, 196] },
+            1.0,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+        );
+    }
+}
+
 unsafe fn paint_control_panel(hwnd: HWND) {
     let mut ps = PAINTSTRUCT::default();
     let hdc = BeginPaint(hwnd, &mut ps);
@@ -1328,6 +1520,7 @@ unsafe fn paint_control_panel(hwnd: HWND) {
     let rem = STATE.remaining_secs;
     let in_settings = STATE.in_settings;
     let close_to_tray = STATE.close_to_tray;
+    let lang_pref = STATE.lang_pref;
     let vx_i = (STATE.anim_view_slide * 12.0).round() as i32;
     let vx = vx_i as f32;
 
@@ -1482,9 +1675,9 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 text_buf,
                 if tr { "Başlangıç" } else { "Startup" },
                 18 + vx_i,
-                44,
+                40,
                 200,
-                18,
+                16,
                 dpi,
                 font_section,
                 [158, 158, 158],
@@ -1493,8 +1686,8 @@ unsafe fn paint_control_panel(hwnd: HWND) {
             );
 
             let auto_fill = if hover == HIT_TOGGLE_AUTOSTART { [50, 50, 50] } else { [43, 43, 43] };
-            canvas.draw_round_card(16.0 + vx, 66.0, 328.0, 62.0, 8.0, auto_fill, 1.0, [58, 58, 58], 1.0);
-            canvas.draw_winui_toggle(286.0 + vx, 87.0, 40.0, 20.0, STATE.anim_auto_toggle);
+            canvas.draw_round_card(16.0 + vx, 58.0, 328.0, 52.0, 8.0, auto_fill, 1.0, [58, 58, 58], 1.0);
+            canvas.draw_winui_toggle(286.0 + vx, 74.0, 40.0, 20.0, STATE.anim_auto_toggle);
 
             draw_glass_text(
                 &mut canvas,
@@ -1502,9 +1695,9 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 text_buf,
                 "\u{E7B5}",
                 28 + vx_i,
-                66,
+                58,
                 24,
-                62,
+                52,
                 dpi,
                 font_fluent,
                 [224, 224, 224],
@@ -1517,9 +1710,9 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 text_buf,
                 if tr { "Windows başlangıcında çalıştır" } else { "Run at Windows startup" },
                 60 + vx_i,
-                76,
+                65,
                 216,
-                20,
+                18,
                 dpi,
                 font_body,
                 [243, 243, 243],
@@ -1532,7 +1725,7 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 text_buf,
                 if tr { "Oturum açıldığında otomatik başlar" } else { "Launch automatically at sign-in" },
                 60 + vx_i,
-                96,
+                84,
                 216,
                 16,
                 dpi,
@@ -1542,53 +1735,6 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
 
-            draw_glass_text(
-                &mut canvas,
-                text_dc,
-                text_buf,
-                if tr { "Kapatma Tuşu (\u{2715}) Davranışı" } else { "Close Button (\u{2715}) Behavior" },
-                18 + vx_i,
-                142,
-                260,
-                18,
-                dpi,
-                font_section,
-                [158, 158, 158],
-                1.0,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
-            );
-
-            canvas.draw_round_card(16.0 + vx, 164.0, 328.0, 122.0, 8.0, [43, 43, 43], 1.0, [58, 58, 58], 1.0);
-            draw_glass_text(
-                &mut canvas,
-                text_dc,
-                text_buf,
-                "\u{E8BB}",
-                28 + vx_i,
-                174,
-                24,
-                38,
-                dpi,
-                font_fluent_gear,
-                [224, 224, 224],
-                1.0,
-                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-            );
-            draw_glass_text(
-                &mut canvas,
-                text_dc,
-                text_buf,
-                if tr { "Kapatma tuşuna basıldığında" } else { "When clicking the close button" },
-                60 + vx_i,
-                174,
-                268,
-                20,
-                dpi,
-                font_body,
-                [243, 243, 243],
-                1.0,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
-            );
             let close_desc = if close_to_tray {
                 if tr {
                     "Sistem tepsisine küçültülür (arka planda çalışır)"
@@ -1600,64 +1746,93 @@ unsafe fn paint_control_panel(hwnd: HWND) {
             } else {
                 "Closes the application completely"
             };
-            draw_glass_text(
-                &mut canvas,
-                text_dc,
-                text_buf,
-                close_desc,
-                60 + vx_i,
-                194,
-                268,
-                16,
-                dpi,
-                font_sub,
-                [96, 205, 255],
-                1.0,
-                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
-            );
-
-            canvas.draw_round_card(28.0 + vx, 224.0, 304.0, 46.0, 6.0, [32, 32, 32], 1.0, [54, 54, 54], 1.0);
             let close_opts: [(usize, bool, f32, &str); 2] = [
                 (
                     HIT_CLOSE_TO_TRAY,
-                    true,
+                    close_to_tray,
                     32.0,
                     if tr { "Alta Al (Tepsi)" } else { "Minimize to Tray" },
                 ),
                 (
                     HIT_CLOSE_EXIT,
-                    false,
+                    !close_to_tray,
                     182.0,
                     if tr { "Uygulamayı Kapat" } else { "Exit Application" },
                 ),
             ];
-            for &(hid, is_tray_opt, ox, _) in &close_opts {
-                if hover == hid && close_to_tray != is_tray_opt {
-                    canvas.draw_round_card(ox + vx, 228.0, 146.0, 38.0, 5.0, [46, 46, 46], 1.0, [46, 46, 46], 0.0);
-                }
-            }
-            let opt_x = 32.0 + STATE.anim_close_opt * 150.0 + vx;
-            canvas.draw_round_card(opt_x, 228.0, 146.0, 38.0, 5.0, [56, 56, 56], 1.0, [70, 70, 70], 1.0);
-            canvas.draw_round_card(opt_x + 53.0, 261.0, 40.0, 3.0, 1.5, [76, 194, 255], 1.0, [76, 194, 255], 0.0);
+            draw_settings_selector(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                dpi,
+                vx_i,
+                hover,
+                font_section,
+                font_fluent_gear,
+                font_sub,
+                font_body,
+                font_body_bold,
+                &SettingsSelectorSpec {
+                    section_title: if tr { "Kapatma Tuşu (\u{2715})" } else { "Close Button (\u{2715})" },
+                    section_y: 116,
+                    card_y: 134.0,
+                    glyph: "\u{E8BB}",
+                    status_text: close_desc,
+                    anim_idx: STATE.anim_close_opt,
+                    step_x: 150.0,
+                    pill_w: 146.0,
+                    accent_w: 40.0,
+                    opts: &close_opts,
+                },
+            );
 
-            for &(_, is_tray_opt, ox, label) in &close_opts {
-                let selected = close_to_tray == is_tray_opt;
-                draw_glass_text(
-                    &mut canvas,
-                    text_dc,
-                    text_buf,
-                    label,
-                    ox as i32 + vx_i,
-                    227,
-                    146,
-                    34,
-                    dpi,
-                    if selected { font_body_bold } else { font_body },
-                    if selected { [255, 255, 255] } else { [196, 196, 196] },
-                    1.0,
-                    DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-                );
-            }
+            let sys_tr = system_is_turkish();
+            let lang_desc = match lang_pref {
+                LangPref::System => {
+                    if sys_tr {
+                        "Sistem dili algılandı (Türkçe)"
+                    } else {
+                        "System language detected (English)"
+                    }
+                }
+                LangPref::Turkish => "Türkçe arayüz seçili",
+                LangPref::English => "English interface selected",
+            };
+            let lang_opts: [(usize, bool, f32, &str); 3] = [
+                (
+                    HIT_LANG_SYSTEM,
+                    lang_pref == LangPref::System,
+                    32.0,
+                    if tr { "Sistem" } else { "System" },
+                ),
+                (HIT_LANG_TR, lang_pref == LangPref::Turkish, 132.0, "Türkçe"),
+                (HIT_LANG_EN, lang_pref == LangPref::English, 232.0, "English"),
+            ];
+            draw_settings_selector(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                dpi,
+                vx_i,
+                hover,
+                font_section,
+                font_fluent_gear,
+                font_sub,
+                font_body,
+                font_body_bold,
+                &SettingsSelectorSpec {
+                    section_title: if tr { "Uygulama Dili" } else { "App Language" },
+                    section_y: 214,
+                    card_y: 232.0,
+                    glyph: "\u{E774}",
+                    status_text: lang_desc,
+                    anim_idx: STATE.anim_lang_idx,
+                    step_x: 100.0,
+                    pill_w: 96.0,
+                    accent_w: 36.0,
+                    opts: &lang_opts,
+                },
+            );
         } else {
             // === MAIN CONTROL VIEW ===
             // 3. Hero SettingsCard (16, 44, 328, 72, r = 8)
@@ -1883,7 +2058,6 @@ fn main() -> Result<()> {
             }
         }
 
-        STATE.lang_tr = (GetUserDefaultUILanguage() & 0x3FF) == 0x1F;
         load_app_settings();
         STATE.in_settings = std::env::args().any(|a| a == "--settings");
         let instance = GetModuleHandleW(None)?;
@@ -1914,11 +2088,7 @@ fn main() -> Result<()> {
 
         let _ = RegisterClassW(&wc);
 
-        let title = if STATE.lang_tr {
-            w!("AlwaysOn Kontrol Paneli")
-        } else {
-            w!("AlwaysOn Control Panel")
-        };
+        let title = app_window_title(STATE.lang_tr);
 
         let hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
@@ -2149,6 +2319,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     start_ui_anim(hwnd);
                     let _ = InvalidateRect(hwnd, None, false);
                 }
+                HIT_LANG_SYSTEM => set_language_pref(hwnd, LangPref::System),
+                HIT_LANG_TR => set_language_pref(hwnd, LangPref::Turkish),
+                HIT_LANG_EN => set_language_pref(hwnd, LangPref::English),
                 HIT_BTN_HIDE => hide_control_panel(hwnd, false),
                 HIT_BTN_EXIT => {
                     if STATE.close_to_tray {
@@ -2456,11 +2629,21 @@ mod tests {
 
     static STATE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    unsafe fn delete_reg_value(name: PCWSTR) {
+        let mut hkey = HKEY::default();
+        if RegOpenKeyExW(HKEY_CURRENT_USER, SETTINGS_KEY_PATH, 0, KEY_SET_VALUE, &mut hkey).is_ok() {
+            let _ = RegDeleteValueW(hkey, name);
+            let _ = RegCloseKey(hkey);
+        }
+    }
+
     struct RegRestoreGuard {
         orig_close: u32,
         orig_disp: u32,
+        orig_lang: u32,
         had_close: bool,
         had_disp: bool,
+        had_lang: bool,
     }
 
     unsafe fn reg_has_value(name: PCWSTR) -> Option<u32> {
@@ -2493,11 +2676,14 @@ mod tests {
         unsafe fn capture() -> Self {
             let c = reg_has_value(REG_CLOSE_TO_TRAY);
             let d = reg_has_value(REG_KEEP_DISPLAY_ON);
+            let l = reg_has_value(REG_LANGUAGE);
             Self {
                 orig_close: c.unwrap_or(1),
                 orig_disp: d.unwrap_or(1),
+                orig_lang: l.unwrap_or(0),
                 had_close: c.is_some(),
                 had_disp: d.is_some(),
+                had_lang: l.is_some(),
             }
         }
     }
@@ -2508,12 +2694,17 @@ mod tests {
                 if self.had_close {
                     write_reg_dword(REG_CLOSE_TO_TRAY, self.orig_close);
                 } else {
-                    write_reg_dword(REG_CLOSE_TO_TRAY, 1);
+                    delete_reg_value(REG_CLOSE_TO_TRAY);
                 }
                 if self.had_disp {
                     write_reg_dword(REG_KEEP_DISPLAY_ON, self.orig_disp);
                 } else {
-                    write_reg_dword(REG_KEEP_DISPLAY_ON, 1);
+                    delete_reg_value(REG_KEEP_DISPLAY_ON);
+                }
+                if self.had_lang {
+                    write_reg_dword(REG_LANGUAGE, self.orig_lang);
+                } else {
+                    delete_reg_value(REG_LANGUAGE);
                 }
                 load_app_settings();
             }
@@ -2539,15 +2730,19 @@ mod tests {
             assert_eq!(hit_test_ui(120, 250), HIT_TOGGLE_DISPLAY);
             assert_eq!(hit_test_ui(120, 130), HIT_NONE);
 
-            // Settings view caption + startup toggle + close behavior options
+            // Settings view caption + startup toggle + close behavior + language selector
             STATE.in_settings = true;
             assert_eq!(hit_test_ui(24, 18), HIT_BTN_BACK);
             assert_eq!(hit_test_ui(254, 15), HIT_BTN_SETTINGS);
-            assert_eq!(hit_test_ui(120, 95), HIT_TOGGLE_AUTOSTART);
-            assert_eq!(hit_test_ui(100, 245), HIT_CLOSE_TO_TRAY);
-            assert_eq!(hit_test_ui(250, 245), HIT_CLOSE_EXIT);
-            // Main-only selector bar area should be HIT_NONE while in Settings
-            assert_eq!(hit_test_ui(135, 170), HIT_NONE);
+            assert_eq!(hit_test_ui(120, 84), HIT_TOGGLE_AUTOSTART);
+            assert_eq!(hit_test_ui(100, 180), HIT_CLOSE_TO_TRAY);
+            assert_eq!(hit_test_ui(250, 180), HIT_CLOSE_EXIT);
+            assert_eq!(hit_test_ui(80, 280), HIT_LANG_SYSTEM);
+            assert_eq!(hit_test_ui(180, 280), HIT_LANG_TR);
+            assert_eq!(hit_test_ui(280, 280), HIT_LANG_EN);
+            // Gaps & card headers outside buttons must return HIT_NONE
+            assert_eq!(hit_test_ui(180, 124), HIT_NONE);
+            assert_eq!(hit_test_ui(180, 245), HIT_NONE);
 
             STATE.in_settings = orig_settings;
         }
@@ -2607,25 +2802,53 @@ mod tests {
 
     #[test]
     fn test_scenario_registry_settings_roundtrip() {
+        assert_eq!(lang_pref_from_dword(0), LangPref::System);
+        assert_eq!(lang_pref_from_dword(1), LangPref::Turkish);
+        assert_eq!(lang_pref_from_dword(2), LangPref::English);
+        assert_eq!(lang_pref_from_dword(99), LangPref::System);
+
+        assert!(resolve_lang_tr(LangPref::System, true));
+        assert!(!resolve_lang_tr(LangPref::System, false));
+        assert!(resolve_lang_tr(LangPref::Turkish, false));
+        assert!(!resolve_lang_tr(LangPref::English, true));
+
         let _lock = STATE_TEST_LOCK.lock().unwrap();
         unsafe {
             let _guard = RegRestoreGuard::capture();
 
             write_reg_dword(REG_CLOSE_TO_TRAY, 0);
             write_reg_dword(REG_KEEP_DISPLAY_ON, 0);
+            write_reg_dword(REG_LANGUAGE, 2);
             load_app_settings();
+            let lp_en = STATE.lang_pref;
             assert!(!STATE.close_to_tray);
             assert!(!STATE.keep_display_on);
+            assert_eq!(lp_en, LangPref::English);
+            assert!(!STATE.lang_tr);
             assert!((STATE.anim_close_opt - 1.0).abs() < f32::EPSILON);
             assert!((STATE.anim_disp_toggle - 0.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_lang_idx - 2.0).abs() < f32::EPSILON);
+
+            write_reg_dword(REG_LANGUAGE, 1);
+            load_app_settings();
+            let lp_tr = STATE.lang_pref;
+            assert_eq!(lp_tr, LangPref::Turkish);
+            assert!(STATE.lang_tr);
+            assert!((STATE.anim_lang_idx - 1.0).abs() < f32::EPSILON);
 
             write_reg_dword(REG_CLOSE_TO_TRAY, 1);
             write_reg_dword(REG_KEEP_DISPLAY_ON, 1);
+            write_reg_dword(REG_LANGUAGE, 0);
             load_app_settings();
+            let lp_sys = STATE.lang_pref;
+            let ltr_sys = STATE.lang_tr;
             assert!(STATE.close_to_tray);
             assert!(STATE.keep_display_on);
+            assert_eq!(lp_sys, LangPref::System);
+            assert_eq!(ltr_sys, system_is_turkish());
             assert!((STATE.anim_close_opt - 0.0).abs() < f32::EPSILON);
             assert!((STATE.anim_disp_toggle - 1.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_lang_idx - 0.0).abs() < f32::EPSILON);
         }
     }
 
