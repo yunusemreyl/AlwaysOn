@@ -1,7 +1,6 @@
 #![windows_subsystem = "windows"]
 
 use std::ffi::c_void;
-use std::fs;
 use std::mem;
 use std::path::{Path, PathBuf};
 use windows::core::*;
@@ -67,6 +66,9 @@ const HIT_LANG_BASE: usize = 14; // 14..=25 (System + 11 languages)
 const HIT_THEME_SYSTEM: usize = 26;
 const HIT_THEME_LIGHT: usize = 27;
 const HIT_THEME_DARK: usize = 28;
+const HIT_BTN_GITHUB: usize = 29;
+const HIT_BTN_PORTABLE_INFO: usize = 30;
+const HIT_FIRST_RUN_OK: usize = 31;
 
 const RUN_KEY_PATH: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const STARTUP_APPROVED_PATH: PCWSTR =
@@ -77,6 +79,8 @@ const REG_CLOSE_TO_TRAY: PCWSTR = w!("CloseToTray");
 const REG_KEEP_DISPLAY_ON: PCWSTR = w!("KeepDisplayOn");
 const REG_LANGUAGE: PCWSTR = w!("Language");
 const REG_THEME: PCWSTR = w!("Theme");
+const REG_FIRST_RUN_DONE: PCWSTR = w!("FirstRunShown");
+const GITHUB_PROFILE_URL: PCWSTR = w!("https://github.com/yunusemreyl");
 const PERSONALIZE_KEY_PATH: PCWSTR =
     w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
 const REG_APPS_USE_LIGHT_THEME: PCWSTR = w!("AppsUseLightTheme");
@@ -179,6 +183,10 @@ struct UiStrings {
     lang_desc_system_prefix: &'static str,
     lang_desc_selected: &'static str,
     lang_opt_system: &'static str,
+    portable_title: &'static str,
+    portable_body: &'static str,
+    portable_ok: &'static str,
+    portable_footer_tip: &'static str,
     tray_inactive: &'static str,
     tray_active: &'static str,
     notify_activated: &'static str,
@@ -230,6 +238,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "Sistem dili algılandı",
         lang_desc_selected: "Türkçe arayüz seçili",
         lang_opt_system: "Sistem",
+        portable_title: "Taşınabilir (Portable) Sürüm",
+        portable_body: "AlwaysOn tek bir çalışabilir (.exe) dosyadır; kurulum gerektirmez.\n\nKalıcılık ve Windows başlangıç ayarının sorunsuz çalışması için bu dosyayı kalıcı ve güvenilir bir klasöre kopyalayıp oradan çalıştırmanız önerilir.",
+        portable_ok: "Anladım, Devam Et",
+        portable_footer_tip: "Kalıcılık Notu",
         tray_inactive: "AlwaysOn: Kapalı",
         tray_active: "AlwaysOn: Aktif",
         notify_activated: "Uyku engelleme aktif.",
@@ -279,6 +291,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "System language detected",
         lang_desc_selected: "English interface selected",
         lang_opt_system: "System",
+        portable_title: "Portable Single-EXE Edition",
+        portable_body: "AlwaysOn runs from a single standalone executable (.exe) with no installer.\n\nTo ensure persistence and reliable Windows startup, copy this file into a permanent, trusted folder before enabling startup.",
+        portable_ok: "Got it, Continue",
+        portable_footer_tip: "Portable Note",
         tray_inactive: "AlwaysOn: Inactive",
         tray_active: "AlwaysOn: Active",
         notify_activated: "AlwaysOn activated.",
@@ -328,6 +344,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "Systemsprache erkannt",
         lang_desc_selected: "Deutsche Oberfläche ausgewählt",
         lang_opt_system: "System",
+        portable_title: "Portable Einzeldatei (.exe)",
+        portable_body: "AlwaysOn läuft als einzelne portable EXE ohne Installation.\n\nFür dauerhafte Speicherung und zuverlässigen Autostart kopieren Sie die Datei bitte in einen festen, vertrauenswürdigen Ordner.",
+        portable_ok: "Verstanden, weiter",
+        portable_footer_tip: "Portable-Hinweis",
         tray_inactive: "AlwaysOn: Inaktiv",
         tray_active: "AlwaysOn: Aktiv",
         notify_activated: "AlwaysOn aktiviert.",
@@ -377,6 +397,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "Langue système détectée",
         lang_desc_selected: "Interface française sélectionnée",
         lang_opt_system: "Système",
+        portable_title: "Édition portable (.exe unique)",
+        portable_body: "AlwaysOn fonctionne depuis un seul exécutable sans installation.\n\nPour garantir la persistance et un démarrage Windows fiable, copiez ce fichier dans un dossier fixe et approuvé.",
+        portable_ok: "Compris, continuer",
+        portable_footer_tip: "Note portable",
         tray_inactive: "AlwaysOn : Inactif",
         tray_active: "AlwaysOn : Actif",
         notify_activated: "AlwaysOn activé.",
@@ -426,6 +450,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "Idioma del sistema",
         lang_desc_selected: "Interfaz en español seleccionada",
         lang_opt_system: "Sistema",
+        portable_title: "Edición portátil (.exe único)",
+        portable_body: "AlwaysOn funciona desde un único ejecutable sin instalador.\n\nPara asegurar persistencia y un inicio fiable con Windows, copie este archivo a una carpeta permanente y de confianza.",
+        portable_ok: "Entendido, continuar",
+        portable_footer_tip: "Nota portátil",
         tray_inactive: "AlwaysOn: Inactivo",
         tray_active: "AlwaysOn: Activo",
         notify_activated: "AlwaysOn activado.",
@@ -475,6 +503,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "Lingua di sistema",
         lang_desc_selected: "Interfaccia italiana selezionata",
         lang_opt_system: "Sistema",
+        portable_title: "Edizione portatile (.exe singolo)",
+        portable_body: "AlwaysOn funziona da un singolo file eseguibile senza installazione.\n\nPer garantire la persistenza e un avvio affidabile con Windows, copia il file in una cartella permanente e sicura.",
+        portable_ok: "Ho capito, continua",
+        portable_footer_tip: "Nota portatile",
         tray_inactive: "AlwaysOn: Inattivo",
         tray_active: "AlwaysOn: Attivo",
         notify_activated: "AlwaysOn attivato.",
@@ -524,6 +556,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "Idioma do sistema",
         lang_desc_selected: "Interface em português selecionada",
         lang_opt_system: "Sistema",
+        portable_title: "Edição portátil (.exe único)",
+        portable_body: "AlwaysOn executa a partir de um único arquivo executável sem instalação.\n\nPara garantir persistência e inicialização confiável com o Windows, copie este arquivo para uma pasta permanente e confiável.",
+        portable_ok: "Entendi, continuar",
+        portable_footer_tip: "Nota portátil",
         tray_inactive: "AlwaysOn: Inativo",
         tray_active: "AlwaysOn: Ativo",
         notify_activated: "AlwaysOn ativado.",
@@ -573,6 +609,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "Системный язык",
         lang_desc_selected: "Выбран русский интерфейс",
         lang_opt_system: "Система",
+        portable_title: "Портативная версия (один .exe)",
+        portable_body: "AlwaysOn запускается из одного переносимого EXE без установки.\n\nДля надёжного автозапуска и сохранения выберите для файла постоянную доверенную папку.",
+        portable_ok: "Понятно, продолжить",
+        portable_footer_tip: "О портативности",
         tray_inactive: "AlwaysOn: Откл.",
         tray_active: "AlwaysOn: Активно",
         notify_activated: "AlwaysOn включён.",
@@ -622,6 +662,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "检测到系统语言",
         lang_desc_selected: "已选择简体中文界面",
         lang_opt_system: "系统",
+        portable_title: "绿色便携版（单文件 EXE）",
+        portable_body: "AlwaysOn 为单文件绿色便携程序，无需安装。\n\n为确保开机自启稳定与长期使用，建议将此 EXE 复制到固定且受信任的文件夹中运行。",
+        portable_ok: "知道了，继续",
+        portable_footer_tip: "便携说明",
         tray_inactive: "AlwaysOn: 已关闭",
         tray_active: "AlwaysOn: 已激活",
         notify_activated: "AlwaysOn 已激活。",
@@ -671,6 +715,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "システム言語を検出",
         lang_desc_selected: "日本語インターフェース選択中",
         lang_opt_system: "システム",
+        portable_title: "ポータブル単体 EXE 版",
+        portable_body: "AlwaysOn はインストール不要の単体実行ファイルです。\n\n設定の永続化と安定した Windows 自動起動のため、信頼できる固定フォルダへコピーして実行することをおすすめします。",
+        portable_ok: "了解、続行する",
+        portable_footer_tip: "ポータブル情報",
         tray_inactive: "AlwaysOn: 停止",
         tray_active: "AlwaysOn: 有効",
         notify_activated: "AlwaysOn を有効にしました。",
@@ -720,6 +768,10 @@ const UI_STRINGS: [UiStrings; 11] = [
         lang_desc_system_prefix: "시스템 언어 감지됨",
         lang_desc_selected: "한국어 인터페이스 선택됨",
         lang_opt_system: "시스템",
+        portable_title: "포터블 단일 EXE 버전",
+        portable_body: "AlwaysOn은 설치가 필요 없는 단일 실행 파일입니다.\n\n안정적인 시작 프로그램 등록과 지속적인 사용을 위해 신뢰할 수 있는 고정 폴더에 복사하여 실행하세요.",
+        portable_ok: "확인, 계속하기",
+        portable_footer_tip: "포터블 안내",
         tray_inactive: "AlwaysOn: 꺼짐",
         tray_active: "AlwaysOn: 활성",
         notify_activated: "AlwaysOn이 활성화되었습니다.",
@@ -750,6 +802,7 @@ struct AppState {
     keep_display_on: bool,
     close_to_tray: bool,
     in_settings: bool,
+    show_first_run: bool,
     autostart_cached: bool,
     remaining_secs: u32,
     hover_item: usize,
@@ -785,6 +838,7 @@ static mut STATE: AppState = AppState {
     keep_display_on: true,
     close_to_tray: true,
     in_settings: false,
+    show_first_run: false,
     autostart_cached: false,
     remaining_secs: 0,
     hover_item: HIT_NONE,
@@ -958,15 +1012,6 @@ fn current_exe_path() -> Option<PathBuf> {
     }
 }
 
-fn get_stable_install_path() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|base| {
-        PathBuf::from(base)
-            .join("Programs")
-            .join("AlwaysOn")
-            .join("AlwaysOn.exe")
-    })
-}
-
 fn paths_equal(a: &Path, b: &Path) -> bool {
     a.to_string_lossy()
         .eq_ignore_ascii_case(&b.to_string_lossy())
@@ -1045,31 +1090,8 @@ unsafe fn clear_startup_disabled_flag() {
 }
 
 unsafe fn enable_autostart(clear_approved: bool) {
-    let Some(curr_exe) = current_exe_path() else {
+    let Some(target_exe) = current_exe_path() else {
         return;
-    };
-
-    let target_exe = match get_stable_install_path() {
-        Some(stable) => {
-            if paths_equal(&curr_exe, &stable) {
-                stable
-            } else {
-                let copied = stable
-                    .parent()
-                    .map(fs::create_dir_all)
-                    .transpose()
-                    .ok()
-                    .flatten()
-                    .and_then(|_| fs::copy(&curr_exe, &stable).ok())
-                    .is_some();
-                if copied || stable.exists() {
-                    stable
-                } else {
-                    curr_exe
-                }
-            }
-        }
-        None => curr_exe,
     };
 
     let mut hkey = HKEY::default();
@@ -1120,12 +1142,7 @@ unsafe fn sync_autostart_if_configured() {
         return;
     };
 
-    let needs_repair = !configured_exe.exists()
-        || get_stable_install_path()
-            .map(|stable| !paths_equal(&configured_exe, &stable) || !paths_equal(&curr_exe, &stable))
-            .unwrap_or(false);
-
-    if needs_repair {
+    if !configured_exe.exists() || !paths_equal(&configured_exe, &curr_exe) {
         enable_autostart(false);
     }
 }
@@ -1320,6 +1337,7 @@ unsafe fn load_app_settings() {
     STATE.lang = resolve_lang(STATE.lang_pref, system_detected_lang());
     STATE.theme_pref = theme_pref_from_dword(read_reg_dword(REG_THEME, 0));
     STATE.is_light_theme = resolve_is_light_theme(STATE.theme_pref, system_uses_light_theme());
+    STATE.show_first_run = read_reg_dword(REG_FIRST_RUN_DONE, 0) == 0;
     STATE.autostart_cached = is_autostart();
     sync_anim_immediately();
 }
@@ -1747,6 +1765,7 @@ fn in_rect(x: i32, y: i32, rx: i32, ry: i32, rw: i32, rh: i32) -> bool {
 
 fn hit_test_ui(lx: i32, ly: i32) -> usize {
     let in_settings = unsafe { STATE.in_settings };
+    let show_first_run = unsafe { STATE.show_first_run };
     if in_rect(lx, ly, 236, 5, 36, 28) {
         return HIT_BTN_SETTINGS;
     }
@@ -1780,6 +1799,14 @@ fn hit_test_ui(lx: i32, ly: i32) -> usize {
             }
         }
         HIT_NONE
+    } else if show_first_run {
+        if in_rect(lx, ly, 28, 266, 304, 38) {
+            HIT_BTN_GITHUB
+        } else if in_rect(lx, ly, 16, 332, 328, 40) {
+            HIT_FIRST_RUN_OK
+        } else {
+            HIT_NONE
+        }
     } else if in_rect(lx, ly, 16, 52, 328, 86) {
         HIT_HERO
     } else if in_rect(lx, ly, 20, 180, 78, 40) {
@@ -1792,6 +1819,10 @@ fn hit_test_ui(lx: i32, ly: i32) -> usize {
         HIT_MODE_3H
     } else if in_rect(lx, ly, 16, 264, 328, 72) {
         HIT_TOGGLE_DISPLAY
+    } else if in_rect(lx, ly, 16, 348, 196, 28) {
+        HIT_BTN_GITHUB
+    } else if in_rect(lx, ly, 218, 348, 126, 28) {
+        HIT_BTN_PORTABLE_INFO
     } else {
         HIT_NONE
     }
@@ -2259,6 +2290,7 @@ unsafe fn paint_control_panel(hwnd: HWND) {
     let hover = STATE.hover_item;
     let rem = STATE.remaining_secs;
     let in_settings = STATE.in_settings;
+    let show_first_run = STATE.show_first_run;
     let close_to_tray = STATE.close_to_tray;
     let lang_pref = STATE.lang_pref;
     let theme_pref = STATE.theme_pref;
@@ -2756,6 +2788,113 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE,
                 );
             }
+        } else if show_first_run {
+            // === FIRST-RUN PORTABLE PERSISTENCE NOTICE ===
+            canvas.draw_round_card(16.0 + vx, 48.0, 328.0, 272.0, 10.0, pal.card_fill, 1.0, pal.card_border, 1.0);
+            canvas.draw_rgba_icon(mug_rgba, 28.0 + vx, 62.0, 40.0, 40.0);
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                ui.portable_title,
+                78 + vx_i,
+                63,
+                252,
+                20,
+                dpi,
+                font_title_disp,
+                pal.text_selected,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "Portable • Single EXE",
+                78 + vx_i,
+                84,
+                252,
+                16,
+                dpi,
+                font_sub,
+                pal.accent_text,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                ui.portable_body,
+                28 + vx_i,
+                118,
+                304,
+                138,
+                dpi,
+                font_body,
+                pal.text_primary,
+                1.0,
+                DT_LEFT | DT_TOP | DT_WORDBREAK,
+            );
+
+            // Clickable GitHub link pill inside notice card
+            let gh_fill = if hover == HIT_BTN_GITHUB { pal.pill_hover } else { pal.track_fill };
+            canvas.draw_round_card(28.0 + vx, 266.0, 304.0, 38.0, 6.0, gh_fill, 1.0, pal.track_border, 1.0);
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "\u{E71B}",
+                42 + vx_i,
+                266,
+                20,
+                38,
+                dpi,
+                font_fluent_sm,
+                pal.accent_text,
+                1.0,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "github.com/yunusemreyl",
+                68 + vx_i,
+                266,
+                248,
+                38,
+                dpi,
+                font_body_bold,
+                pal.accent_text,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+
+            // Primary Confirm Button
+            let ok_fill = if hover == HIT_FIRST_RUN_OK {
+                if pal.is_light { [0, 90, 172] } else { [96, 206, 255] }
+            } else {
+                pal.accent
+            };
+            canvas.draw_round_card(16.0 + vx, 332.0, 328.0, 40.0, 8.0, ok_fill, 1.0, ok_fill, 0.0);
+            let ok_ink = if pal.is_light { [255, 255, 255] } else { [18, 18, 18] };
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                ui.portable_ok,
+                16 + vx_i,
+                332,
+                328,
+                40,
+                dpi,
+                font_body_bold,
+                ok_ink,
+                1.0,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
         } else {
             // === MAIN CONTROL VIEW (360 x 388) ===
             // 3. Hero SettingsCard (16, 52, 328, 86, r = 8)
@@ -2948,6 +3087,73 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 dpi,
                 font_sub,
                 pal.text_muted,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+
+            // 6. Footer Strip: Clickable GitHub link & Portable Note re-opener (y = 348..376)
+            let gh_foot_fill = if hover == HIT_BTN_GITHUB { pal.card_hover } else { pal.card_fill };
+            canvas.draw_round_card(16.0 + vx, 348.0, 196.0, 28.0, 6.0, gh_foot_fill, 1.0, pal.card_border, 1.0);
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "\u{E71B}",
+                24 + vx_i,
+                348,
+                16,
+                28,
+                dpi,
+                font_fluent_sm,
+                pal.accent_text,
+                1.0,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "github.com/yunusemreyl",
+                44 + vx_i,
+                348,
+                162,
+                28,
+                dpi,
+                font_sub,
+                pal.accent_text,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+
+            let info_foot_fill = if hover == HIT_BTN_PORTABLE_INFO { pal.card_hover } else { pal.card_fill };
+            canvas.draw_round_card(218.0 + vx, 348.0, 126.0, 28.0, 6.0, info_foot_fill, 1.0, pal.card_border, 1.0);
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "\u{E946}",
+                224 + vx_i,
+                348,
+                16,
+                28,
+                dpi,
+                font_fluent_sm,
+                pal.text_muted,
+                1.0,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                ui.portable_footer_tip,
+                242 + vx_i,
+                348,
+                96,
+                28,
+                dpi,
+                font_sub,
+                pal.text_secondary,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -3239,6 +3445,31 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                         PostQuitMessage(0);
                     }
                 }
+                HIT_FIRST_RUN_OK => {
+                    STATE.show_first_run = false;
+                    write_reg_dword(REG_FIRST_RUN_DONE, 1);
+                    STATE.anim_view_slide = -1.0;
+                    STATE.hover_item = HIT_NONE;
+                    start_ui_anim(hwnd);
+                    let _ = InvalidateRect(hwnd, None, false);
+                }
+                HIT_BTN_PORTABLE_INFO => {
+                    STATE.show_first_run = true;
+                    STATE.anim_view_slide = 1.0;
+                    STATE.hover_item = HIT_NONE;
+                    start_ui_anim(hwnd);
+                    let _ = InvalidateRect(hwnd, None, false);
+                }
+                HIT_BTN_GITHUB => {
+                    let _ = ShellExecuteW(
+                        hwnd,
+                        w!("open"),
+                        GITHUB_PROFILE_URL,
+                        None,
+                        None,
+                        SW_SHOWNORMAL,
+                    );
+                }
                 _ => {}
             }
             LRESULT(0)
@@ -3518,10 +3749,12 @@ mod tests {
         orig_disp: u32,
         orig_lang: u32,
         orig_theme: u32,
+        orig_first_run: u32,
         had_close: bool,
         had_disp: bool,
         had_lang: bool,
         had_theme: bool,
+        had_first_run: bool,
     }
 
     unsafe fn reg_has_value(name: PCWSTR) -> Option<u32> {
@@ -3556,15 +3789,18 @@ mod tests {
             let d = reg_has_value(REG_KEEP_DISPLAY_ON);
             let l = reg_has_value(REG_LANGUAGE);
             let t = reg_has_value(REG_THEME);
+            let f = reg_has_value(REG_FIRST_RUN_DONE);
             Self {
                 orig_close: c.unwrap_or(1),
                 orig_disp: d.unwrap_or(1),
                 orig_lang: l.unwrap_or(0),
                 orig_theme: t.unwrap_or(0),
+                orig_first_run: f.unwrap_or(0),
                 had_close: c.is_some(),
                 had_disp: d.is_some(),
                 had_lang: l.is_some(),
                 had_theme: t.is_some(),
+                had_first_run: f.is_some(),
             }
         }
     }
@@ -3592,6 +3828,11 @@ mod tests {
                 } else {
                     delete_reg_value(REG_THEME);
                 }
+                if self.had_first_run {
+                    write_reg_dword(REG_FIRST_RUN_DONE, self.orig_first_run);
+                } else {
+                    delete_reg_value(REG_FIRST_RUN_DONE);
+                }
                 load_app_settings();
             }
         }
@@ -3602,9 +3843,11 @@ mod tests {
         let _lock = STATE_TEST_LOCK.lock().unwrap();
         unsafe {
             let orig_settings = STATE.in_settings;
+            let orig_first_run = STATE.show_first_run;
             STATE.in_settings = false;
+            STATE.show_first_run = false;
 
-            // Main view caption + controls (360 x 388)
+            // Main view caption + controls + footer links (360 x 388)
             assert_eq!(hit_test_ui(254, 15), HIT_BTN_SETTINGS);
             assert_eq!(hit_test_ui(294, 15), HIT_BTN_HIDE);
             assert_eq!(hit_test_ui(334, 15), HIT_BTN_EXIT);
@@ -3614,7 +3857,16 @@ mod tests {
             assert_eq!(hit_test_ui(215, 198), HIT_MODE_1H);
             assert_eq!(hit_test_ui(295, 198), HIT_MODE_3H);
             assert_eq!(hit_test_ui(120, 295), HIT_TOGGLE_DISPLAY);
+            assert_eq!(hit_test_ui(100, 360), HIT_BTN_GITHUB);
+            assert_eq!(hit_test_ui(280, 360), HIT_BTN_PORTABLE_INFO);
             assert_eq!(hit_test_ui(120, 162), HIT_NONE);
+
+            // First-run portable & GitHub notice overlay
+            STATE.show_first_run = true;
+            assert_eq!(hit_test_ui(180, 285), HIT_BTN_GITHUB);
+            assert_eq!(hit_test_ui(180, 352), HIT_FIRST_RUN_OK);
+            assert_eq!(hit_test_ui(120, 162), HIT_NONE);
+            STATE.show_first_run = false;
 
             // Settings view caption + startup toggle + close behavior + theme selector + 3x4 language grid
             STATE.in_settings = true;
@@ -3639,6 +3891,7 @@ mod tests {
             assert_eq!(hit_test_ui(180, 278), HIT_NONE);
 
             STATE.in_settings = orig_settings;
+            STATE.show_first_run = orig_first_run;
         }
     }
 
@@ -3812,6 +4065,10 @@ mod tests {
             write_reg_dword(REG_KEEP_DISPLAY_ON, 1);
             write_reg_dword(REG_LANGUAGE, 0);
             write_reg_dword(REG_THEME, 0);
+            write_reg_dword(REG_FIRST_RUN_DONE, 1);
+            load_app_settings();
+            assert!(!STATE.show_first_run);
+            write_reg_dword(REG_FIRST_RUN_DONE, 0);
             load_app_settings();
             let lp_sys = STATE.lang_pref;
             let l_sys = STATE.lang;
@@ -3819,6 +4076,7 @@ mod tests {
             let is_sys = STATE.is_light_theme;
             assert!(STATE.close_to_tray);
             assert!(STATE.keep_display_on);
+            assert!(STATE.show_first_run);
             assert_eq!(lp_sys, LangPref::System);
             assert_eq!(l_sys, system_detected_lang());
             assert_eq!(tp_sys, ThemePref::System);
