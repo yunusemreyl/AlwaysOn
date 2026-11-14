@@ -43,7 +43,7 @@ const IDM_EXIT: usize = 1006;
 const IDM_30M: usize = 1007;
 
 const UI_LOGICAL_W: i32 = 360;
-const UI_LOGICAL_H: i32 = 320;
+const UI_LOGICAL_H: i32 = 388;
 
 const MUG_ICON_DIM: usize = 72;
 const MUG_AWAKE_RGBA: &[u8] = include_bytes!("../assets/mug_awake.rgba");
@@ -63,9 +63,10 @@ const HIT_BTN_SETTINGS: usize = 10;
 const HIT_BTN_BACK: usize = 11;
 const HIT_CLOSE_TO_TRAY: usize = 12;
 const HIT_CLOSE_EXIT: usize = 13;
-const HIT_LANG_SYSTEM: usize = 14;
-const HIT_LANG_TR: usize = 15;
-const HIT_LANG_EN: usize = 16;
+const HIT_LANG_BASE: usize = 14; // 14..=25 (System + 11 languages)
+const HIT_THEME_SYSTEM: usize = 26;
+const HIT_THEME_LIGHT: usize = 27;
+const HIT_THEME_DARK: usize = 28;
 
 const RUN_KEY_PATH: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const STARTUP_APPROVED_PATH: PCWSTR =
@@ -75,6 +76,10 @@ const SETTINGS_KEY_PATH: PCWSTR = w!("Software\\AlwaysOn");
 const REG_CLOSE_TO_TRAY: PCWSTR = w!("CloseToTray");
 const REG_KEEP_DISPLAY_ON: PCWSTR = w!("KeepDisplayOn");
 const REG_LANGUAGE: PCWSTR = w!("Language");
+const REG_THEME: PCWSTR = w!("Theme");
+const PERSONALIZE_KEY_PATH: PCWSTR =
+    w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+const REG_APPS_USE_LIGHT_THEME: PCWSTR = w!("AppsUseLightTheme");
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 enum Mode {
@@ -86,11 +91,650 @@ enum Mode {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
+enum ThemePref {
+    System = 0,
+    Light = 1,
+    Dark = 2,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
 enum LangPref {
     System = 0,
-    Turkish = 1,
-    English = 2,
+    Tr = 1,
+    En = 2,
+    De = 3,
+    Fr = 4,
+    Es = 5,
+    It = 6,
+    Pt = 7,
+    Ru = 8,
+    Zh = 9,
+    Ja = 10,
+    Ko = 11,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(usize)]
+enum Lang {
+    Tr = 0,
+    En = 1,
+    De = 2,
+    Fr = 3,
+    Es = 4,
+    It = 5,
+    Pt = 6,
+    Ru = 7,
+    Zh = 8,
+    Ja = 9,
+    Ko = 10,
+}
+
+const LANG_NATIVE_NAMES: [&str; 11] = [
+    "Türkçe",
+    "English",
+    "Deutsch",
+    "Français",
+    "Español",
+    "Italiano",
+    "Português",
+    "Русский",
+    "中文",
+    "日本語",
+    "한국어",
+];
+
+struct UiStrings {
+    window_title: PCWSTR,
+    settings_title: &'static str,
+    hero_title: &'static str,
+    hero_active_forever: &'static str,
+    hero_off: &'static str,
+    hero_remaining_prefix: &'static str,
+    section_mode: &'static str,
+    mode_forever: &'static str,
+    mode_30m: &'static str,
+    mode_1h: &'static str,
+    mode_3h: &'static str,
+    section_display: &'static str,
+    display_title: &'static str,
+    display_sub: &'static str,
+    section_startup: &'static str,
+    startup_title: &'static str,
+    startup_sub: &'static str,
+    section_close: &'static str,
+    close_desc_tray: &'static str,
+    close_desc_exit: &'static str,
+    close_opt_tray: &'static str,
+    close_opt_exit: &'static str,
+    section_theme: &'static str,
+    theme_desc_system_dark: &'static str,
+    theme_desc_system_light: &'static str,
+    theme_desc_light: &'static str,
+    theme_desc_dark: &'static str,
+    theme_opt_light: &'static str,
+    theme_opt_dark: &'static str,
+    section_lang: &'static str,
+    lang_desc_system_prefix: &'static str,
+    lang_desc_selected: &'static str,
+    lang_opt_system: &'static str,
+    tray_inactive: &'static str,
+    tray_active: &'static str,
+    notify_activated: &'static str,
+    notify_deactivated: &'static str,
+    notify_timeout: &'static str,
+    menu_open: PCWSTR,
+    menu_off: PCWSTR,
+    menu_forever: PCWSTR,
+    menu_30m: PCWSTR,
+    menu_1h: PCWSTR,
+    menu_3h: PCWSTR,
+    menu_auto: PCWSTR,
+    menu_exit: PCWSTR,
+}
+
+const UI_STRINGS: [UiStrings; 11] = [
+    // 0: Turkish
+    UiStrings {
+        window_title: w!("AlwaysOn Kontrol Paneli"),
+        settings_title: "Ayarlar",
+        hero_title: "Uyku Engelleme",
+        hero_active_forever: "Aktif • Süresiz açık",
+        hero_off: "Kapalı • Normal uyku modu",
+        hero_remaining_prefix: "Kalan süre",
+        section_mode: "Çalışma Modu",
+        mode_forever: "Süresiz",
+        mode_30m: "30 Dakika",
+        mode_1h: "1 Saat",
+        mode_3h: "3 Saat",
+        section_display: "Ekran ve Güç",
+        display_title: "Ekranı da açık tut",
+        display_sub: "Monitörün kapanmasını engeller",
+        section_startup: "Başlangıç",
+        startup_title: "Windows başlangıcında çalıştır",
+        startup_sub: "Oturum açıldığında otomatik başlar",
+        section_close: "Kapatma Tuşu (\u{2715})",
+        close_desc_tray: "Sistem tepsisine küçültülür (arka planda)",
+        close_desc_exit: "Uygulama tamamen kapatılır",
+        close_opt_tray: "Alta Al (Tepsi)",
+        close_opt_exit: "Uygulamayı Kapat",
+        section_theme: "Uygulama Teması",
+        theme_desc_system_dark: "Sistem teması algılandı (Koyu)",
+        theme_desc_system_light: "Sistem teması algılandı (Açık)",
+        theme_desc_light: "Açık tema seçili",
+        theme_desc_dark: "Koyu tema seçili",
+        theme_opt_light: "Açık",
+        theme_opt_dark: "Koyu",
+        section_lang: "Uygulama Dili",
+        lang_desc_system_prefix: "Sistem dili algılandı",
+        lang_desc_selected: "Türkçe arayüz seçili",
+        lang_opt_system: "Sistem",
+        tray_inactive: "AlwaysOn: Kapalı",
+        tray_active: "AlwaysOn: Aktif",
+        notify_activated: "Uyku engelleme aktif.",
+        notify_deactivated: "Uyku engelleme devre dışı.",
+        notify_timeout: "Süre doldu, uyku engelleme kapatıldı.",
+        menu_open: w!("Kontrol Panelini Aç"),
+        menu_off: w!("Kapalı (Normal Uyku)"),
+        menu_forever: w!("Sürekli Açık Tut"),
+        menu_30m: w!("30 Dakika Açık Tut"),
+        menu_1h: w!("1 Saat Açık Tut"),
+        menu_3h: w!("3 Saat Açık Tut"),
+        menu_auto: w!("Başlangıçta Otomatik Çalıştır"),
+        menu_exit: w!("Çıkış"),
+    },
+    // 1: English
+    UiStrings {
+        window_title: w!("AlwaysOn Control Panel"),
+        settings_title: "Settings",
+        hero_title: "Sleep Prevention",
+        hero_active_forever: "Active • Always on",
+        hero_off: "Off • Normal sleep mode",
+        hero_remaining_prefix: "Remaining",
+        section_mode: "Duration Mode",
+        mode_forever: "Always",
+        mode_30m: "30 Min",
+        mode_1h: "1 Hour",
+        mode_3h: "3 Hours",
+        section_display: "Display & Power",
+        display_title: "Keep display awake",
+        display_sub: "Prevents monitor from turning off",
+        section_startup: "Startup",
+        startup_title: "Run at Windows startup",
+        startup_sub: "Launch automatically at sign-in",
+        section_close: "Close Button (\u{2715})",
+        close_desc_tray: "Minimizes to system tray (background)",
+        close_desc_exit: "Closes the application completely",
+        close_opt_tray: "Minimize to Tray",
+        close_opt_exit: "Exit Application",
+        section_theme: "App Theme",
+        theme_desc_system_dark: "System theme detected (Dark)",
+        theme_desc_system_light: "System theme detected (Light)",
+        theme_desc_light: "Light theme selected",
+        theme_desc_dark: "Dark theme selected",
+        theme_opt_light: "Light",
+        theme_opt_dark: "Dark",
+        section_lang: "App Language",
+        lang_desc_system_prefix: "System language detected",
+        lang_desc_selected: "English interface selected",
+        lang_opt_system: "System",
+        tray_inactive: "AlwaysOn: Inactive",
+        tray_active: "AlwaysOn: Active",
+        notify_activated: "AlwaysOn activated.",
+        notify_deactivated: "AlwaysOn deactivated.",
+        notify_timeout: "Timer ended, sleep prevention deactivated.",
+        menu_open: w!("Open Control Panel"),
+        menu_off: w!("Off (Normal Sleep)"),
+        menu_forever: w!("Always On"),
+        menu_30m: w!("Keep On for 30 Minutes"),
+        menu_1h: w!("Keep On for 1 Hour"),
+        menu_3h: w!("Keep On for 3 Hours"),
+        menu_auto: w!("Run at Startup"),
+        menu_exit: w!("Exit"),
+    },
+    // 2: Deutsch
+    UiStrings {
+        window_title: w!("AlwaysOn Bedienfeld"),
+        settings_title: "Einstellungen",
+        hero_title: "Schlaf verhindern",
+        hero_active_forever: "Aktiv • Dauerhaft ein",
+        hero_off: "Aus • Normaler Ruhemodus",
+        hero_remaining_prefix: "Verbleibend",
+        section_mode: "Laufzeitmodus",
+        mode_forever: "Immer",
+        mode_30m: "30 Min.",
+        mode_1h: "1 Std.",
+        mode_3h: "3 Std.",
+        section_display: "Bildschirm & Energie",
+        display_title: "Bildschirm wach halten",
+        display_sub: "Verhindert Ausschalten des Monitors",
+        section_startup: "Autostart",
+        startup_title: "Bei Windows-Start ausführen",
+        startup_sub: "Automatisch nach Anmeldung starten",
+        section_close: "Schließen-Taste (\u{2715})",
+        close_desc_tray: "In den Infobereich minimieren",
+        close_desc_exit: "Anwendung vollständig beenden",
+        close_opt_tray: "In Tray ablegen",
+        close_opt_exit: "App beenden",
+        section_theme: "App-Design",
+        theme_desc_system_dark: "Systemdesign erkannt (Dunkel)",
+        theme_desc_system_light: "Systemdesign erkannt (Hell)",
+        theme_desc_light: "Helles Design ausgewählt",
+        theme_desc_dark: "Dunkles Design ausgewählt",
+        theme_opt_light: "Hell",
+        theme_opt_dark: "Dunkel",
+        section_lang: "Sprache",
+        lang_desc_system_prefix: "Systemsprache erkannt",
+        lang_desc_selected: "Deutsche Oberfläche ausgewählt",
+        lang_opt_system: "System",
+        tray_inactive: "AlwaysOn: Inaktiv",
+        tray_active: "AlwaysOn: Aktiv",
+        notify_activated: "AlwaysOn aktiviert.",
+        notify_deactivated: "AlwaysOn deaktiviert.",
+        notify_timeout: "Timer abgelaufen, Ruhezustand wieder aktiv.",
+        menu_open: w!("Bedienfeld öffnen"),
+        menu_off: w!("Aus (Normaler Ruhezustand)"),
+        menu_forever: w!("Dauerhaft aktiv"),
+        menu_30m: w!("30 Minuten aktiv"),
+        menu_1h: w!("1 Stunde aktiv"),
+        menu_3h: w!("3 Stunden aktiv"),
+        menu_auto: w!("Beim Start ausführen"),
+        menu_exit: w!("Beenden"),
+    },
+    // 3: Français
+    UiStrings {
+        window_title: w!("Panneau AlwaysOn"),
+        settings_title: "Paramètres",
+        hero_title: "Maintien actif",
+        hero_active_forever: "Actif • Toujours allumé",
+        hero_off: "Inactif • Mise en veille normale",
+        hero_remaining_prefix: "Restant",
+        section_mode: "Mode de durée",
+        mode_forever: "Toujours",
+        mode_30m: "30 Min",
+        mode_1h: "1 Heure",
+        mode_3h: "3 Heures",
+        section_display: "Écran et énergie",
+        display_title: "Garder l'écran allumé",
+        display_sub: "Empêche l'extinction du moniteur",
+        section_startup: "Démarrage",
+        startup_title: "Lancer avec Windows",
+        startup_sub: "Démarrage automatique à la session",
+        section_close: "Bouton fermer (\u{2715})",
+        close_desc_tray: "Réduire dans la zone de notification",
+        close_desc_exit: "Quitter complètement l'application",
+        close_opt_tray: "Réduire (Tray)",
+        close_opt_exit: "Quitter l'app",
+        section_theme: "Thème",
+        theme_desc_system_dark: "Thème système détecté (Sombre)",
+        theme_desc_system_light: "Thème système détecté (Clair)",
+        theme_desc_light: "Thème clair sélectionné",
+        theme_desc_dark: "Thème sombre sélectionné",
+        theme_opt_light: "Clair",
+        theme_opt_dark: "Sombre",
+        section_lang: "Langue",
+        lang_desc_system_prefix: "Langue système détectée",
+        lang_desc_selected: "Interface française sélectionnée",
+        lang_opt_system: "Système",
+        tray_inactive: "AlwaysOn : Inactif",
+        tray_active: "AlwaysOn : Actif",
+        notify_activated: "AlwaysOn activé.",
+        notify_deactivated: "AlwaysOn désactivé.",
+        notify_timeout: "Minuterie terminée, veille réactivée.",
+        menu_open: w!("Ouvrir le panneau"),
+        menu_off: w!("Désactivé (Veille normale)"),
+        menu_forever: w!("Toujours actif"),
+        menu_30m: w!("Activer pendant 30 minutes"),
+        menu_1h: w!("Activer pendant 1 heure"),
+        menu_3h: w!("Activer pendant 3 heures"),
+        menu_auto: w!("Lancer au démarrage"),
+        menu_exit: w!("Quitter"),
+    },
+    // 4: Español
+    UiStrings {
+        window_title: w!("Panel de AlwaysOn"),
+        settings_title: "Ajustes",
+        hero_title: "Evitar suspensión",
+        hero_active_forever: "Activo • Siempre encendido",
+        hero_off: "Inactivo • Suspensión normal",
+        hero_remaining_prefix: "Restante",
+        section_mode: "Duración",
+        mode_forever: "Siempre",
+        mode_30m: "30 Min",
+        mode_1h: "1 Hora",
+        mode_3h: "3 Horas",
+        section_display: "Pantalla y energía",
+        display_title: "Mantener pantalla activa",
+        display_sub: "Evita que el monitor se apague",
+        section_startup: "Inicio",
+        startup_title: "Ejecutar al iniciar Windows",
+        startup_sub: "Iniciar automáticamente al entrar",
+        section_close: "Botón cerrar (\u{2715})",
+        close_desc_tray: "Minimizar a la bandeja del sistema",
+        close_desc_exit: "Cerrar la aplicación por completo",
+        close_opt_tray: "Minimizar (Tray)",
+        close_opt_exit: "Salir de la app",
+        section_theme: "Tema",
+        theme_desc_system_dark: "Tema del sistema (Oscuro)",
+        theme_desc_system_light: "Tema del sistema (Claro)",
+        theme_desc_light: "Tema claro seleccionado",
+        theme_desc_dark: "Tema oscuro seleccionado",
+        theme_opt_light: "Claro",
+        theme_opt_dark: "Oscuro",
+        section_lang: "Idioma",
+        lang_desc_system_prefix: "Idioma del sistema",
+        lang_desc_selected: "Interfaz en español seleccionada",
+        lang_opt_system: "Sistema",
+        tray_inactive: "AlwaysOn: Inactivo",
+        tray_active: "AlwaysOn: Activo",
+        notify_activated: "AlwaysOn activado.",
+        notify_deactivated: "AlwaysOn desactivado.",
+        notify_timeout: "Tiempo finalizado, suspensión reactivada.",
+        menu_open: w!("Abrir panel de control"),
+        menu_off: w!("Desactivado (Suspensión)"),
+        menu_forever: w!("Siempre activo"),
+        menu_30m: w!("Mantener 30 minutos"),
+        menu_1h: w!("Mantener 1 hora"),
+        menu_3h: w!("Mantener 3 horas"),
+        menu_auto: w!("Ejecutar al inicio"),
+        menu_exit: w!("Salir"),
+    },
+    // 5: Italiano
+    UiStrings {
+        window_title: w!("Pannello AlwaysOn"),
+        settings_title: "Impostazioni",
+        hero_title: "Sempre attivo",
+        hero_active_forever: "Attivo • Sempre acceso",
+        hero_off: "Spento • Sospensione normale",
+        hero_remaining_prefix: "Rimanente",
+        section_mode: "Modalità durata",
+        mode_forever: "Sempre",
+        mode_30m: "30 Min",
+        mode_1h: "1 Ora",
+        mode_3h: "3 Ore",
+        section_display: "Schermo e energia",
+        display_title: "Mantieni schermo acceso",
+        display_sub: "Impedisce lo spegnimento del monitor",
+        section_startup: "Avvio",
+        startup_title: "Avvia con Windows",
+        startup_sub: "Avvio automatico all'accesso",
+        section_close: "Pulsante chiudi (\u{2715})",
+        close_desc_tray: "Riduci nell'area di notifica",
+        close_desc_exit: "Chiudi completamente l'app",
+        close_opt_tray: "Riduci a icona",
+        close_opt_exit: "Chiudi l'app",
+        section_theme: "Tema",
+        theme_desc_system_dark: "Tema di sistema (Scuro)",
+        theme_desc_system_light: "Tema di sistema (Chiaro)",
+        theme_desc_light: "Tema chiaro selezionato",
+        theme_desc_dark: "Tema scuro selezionato",
+        theme_opt_light: "Chiaro",
+        theme_opt_dark: "Scuro",
+        section_lang: "Lingua",
+        lang_desc_system_prefix: "Lingua di sistema",
+        lang_desc_selected: "Interfaccia italiana selezionata",
+        lang_opt_system: "Sistema",
+        tray_inactive: "AlwaysOn: Inattivo",
+        tray_active: "AlwaysOn: Attivo",
+        notify_activated: "AlwaysOn attivato.",
+        notify_deactivated: "AlwaysOn disattivato.",
+        notify_timeout: "Timer scaduto, sospensione riattivata.",
+        menu_open: w!("Apri pannello"),
+        menu_off: w!("Spento (Sospensione)"),
+        menu_forever: w!("Sempre attivo"),
+        menu_30m: w!("Attivo per 30 minuti"),
+        menu_1h: w!("Attivo per 1 ora"),
+        menu_3h: w!("Attivo per 3 ore"),
+        menu_auto: w!("Avvia con Windows"),
+        menu_exit: w!("Esci"),
+    },
+    // 6: Português
+    UiStrings {
+        window_title: w!("Painel AlwaysOn"),
+        settings_title: "Definições",
+        hero_title: "Impedir suspensão",
+        hero_active_forever: "Ativo • Sempre ligado",
+        hero_off: "Desligado • Suspensão normal",
+        hero_remaining_prefix: "Restante",
+        section_mode: "Modo de duração",
+        mode_forever: "Sempre",
+        mode_30m: "30 Min",
+        mode_1h: "1 Hora",
+        mode_3h: "3 Horas",
+        section_display: "Tela e energia",
+        display_title: "Manter tela ligada",
+        display_sub: "Impede o monitor de desligar",
+        section_startup: "Inicialização",
+        startup_title: "Iniciar com o Windows",
+        startup_sub: "Iniciar automaticamente na sessão",
+        section_close: "Botão fechar (\u{2715})",
+        close_desc_tray: "Minimizar para a bandeja do sistema",
+        close_desc_exit: "Fechar o aplicativo completamente",
+        close_opt_tray: "Minimizar (Tray)",
+        close_opt_exit: "Sair do app",
+        section_theme: "Tema",
+        theme_desc_system_dark: "Tema do sistema (Escuro)",
+        theme_desc_system_light: "Tema do sistema (Claro)",
+        theme_desc_light: "Tema claro selecionado",
+        theme_desc_dark: "Tema escuro selecionado",
+        theme_opt_light: "Claro",
+        theme_opt_dark: "Escuro",
+        section_lang: "Idioma",
+        lang_desc_system_prefix: "Idioma do sistema",
+        lang_desc_selected: "Interface em português selecionada",
+        lang_opt_system: "Sistema",
+        tray_inactive: "AlwaysOn: Inativo",
+        tray_active: "AlwaysOn: Ativo",
+        notify_activated: "AlwaysOn ativado.",
+        notify_deactivated: "AlwaysOn desativado.",
+        notify_timeout: "Tempo esgotado, suspensão reativada.",
+        menu_open: w!("Abrir painel"),
+        menu_off: w!("Desligado (Suspensão)"),
+        menu_forever: w!("Sempre ligado"),
+        menu_30m: w!("Manter por 30 minutos"),
+        menu_1h: w!("Manter por 1 hora"),
+        menu_3h: w!("Manter por 3 horas"),
+        menu_auto: w!("Iniciar com Windows"),
+        menu_exit: w!("Sair"),
+    },
+    // 7: Русский
+    UiStrings {
+        window_title: w!("Панель AlwaysOn"),
+        settings_title: "Настройки",
+        hero_title: "Запрет сна",
+        hero_active_forever: "Активно • Постоянно вкл.",
+        hero_off: "Выкл. • Обычный режим сна",
+        hero_remaining_prefix: "Осталось",
+        section_mode: "Режим работы",
+        mode_forever: "Всегда",
+        mode_30m: "30 мин",
+        mode_1h: "1 час",
+        mode_3h: "3 часа",
+        section_display: "Экран и питание",
+        display_title: "Не выключать экран",
+        display_sub: "Запрещает отключение монитора",
+        section_startup: "Автозапуск",
+        startup_title: "Запуск вместе с Windows",
+        startup_sub: "Автостарт при входе в систему",
+        section_close: "Кнопка закрытия (\u{2715})",
+        close_desc_tray: "Свернуть в системный трей",
+        close_desc_exit: "Полностью завершить программу",
+        close_opt_tray: "Свернуть в трей",
+        close_opt_exit: "Выйти полностью",
+        section_theme: "Тема оформления",
+        theme_desc_system_dark: "Системная тема (Тёмная)",
+        theme_desc_system_light: "Системная тема (Светлая)",
+        theme_desc_light: "Выбрана светлая тема",
+        theme_desc_dark: "Выбрана тёмная тема",
+        theme_opt_light: "Светлая",
+        theme_opt_dark: "Тёмная",
+        section_lang: "Язык приложения",
+        lang_desc_system_prefix: "Системный язык",
+        lang_desc_selected: "Выбран русский интерфейс",
+        lang_opt_system: "Система",
+        tray_inactive: "AlwaysOn: Откл.",
+        tray_active: "AlwaysOn: Активно",
+        notify_activated: "AlwaysOn включён.",
+        notify_deactivated: "AlwaysOn выключен.",
+        notify_timeout: "Таймер завершён, режим сна включён.",
+        menu_open: w!("Открыть панель"),
+        menu_off: w!("Выкл. (Обычный сон)"),
+        menu_forever: w!("Всегда активно"),
+        menu_30m: w!("Включить на 30 минут"),
+        menu_1h: w!("Включить на 1 час"),
+        menu_3h: w!("Включить на 3 часа"),
+        menu_auto: w!("Запускать с Windows"),
+        menu_exit: w!("Выход"),
+    },
+    // 8: 中文
+    UiStrings {
+        window_title: w!("AlwaysOn 控制面板"),
+        settings_title: "设置",
+        hero_title: "防止休眠",
+        hero_active_forever: "已开启 • 始终保持唤醒",
+        hero_off: "已关闭 • 正常休眠模式",
+        hero_remaining_prefix: "剩余时间",
+        section_mode: "运行时长",
+        mode_forever: "始终开启",
+        mode_30m: "30 分钟",
+        mode_1h: "1 小时",
+        mode_3h: "3 小时",
+        section_display: "显示与电源",
+        display_title: "同时保持屏幕常亮",
+        display_sub: "阻止显示器自动关闭",
+        section_startup: "开机启动",
+        startup_title: "开机自动启动",
+        startup_sub: "登录 Windows 时自动运行",
+        section_close: "关闭按钮 (\u{2715})",
+        close_desc_tray: "最小化到系统托盘（后台运行）",
+        close_desc_exit: "完全退出应用程序",
+        close_opt_tray: "最小化到托盘",
+        close_opt_exit: "退出应用",
+        section_theme: "应用主题",
+        theme_desc_system_dark: "检测到系统主题（深色）",
+        theme_desc_system_light: "检测到系统主题（浅色）",
+        theme_desc_light: "已选择浅色主题",
+        theme_desc_dark: "已选择深色主题",
+        theme_opt_light: "浅色",
+        theme_opt_dark: "深色",
+        section_lang: "界面语言",
+        lang_desc_system_prefix: "检测到系统语言",
+        lang_desc_selected: "已选择简体中文界面",
+        lang_opt_system: "系统",
+        tray_inactive: "AlwaysOn: 已关闭",
+        tray_active: "AlwaysOn: 已激活",
+        notify_activated: "AlwaysOn 已激活。",
+        notify_deactivated: "AlwaysOn 已关闭。",
+        notify_timeout: "计时结束，已恢复系统休眠。",
+        menu_open: w!("打开控制面板"),
+        menu_off: w!("关闭（正常休眠）"),
+        menu_forever: w!("始终保持唤醒"),
+        menu_30m: w!("保持唤醒 30 分钟"),
+        menu_1h: w!("保持唤醒 1 小时"),
+        menu_3h: w!("保持唤醒 3 小时"),
+        menu_auto: w!("开机自动启动"),
+        menu_exit: w!("退出"),
+    },
+    // 9: 日本語
+    UiStrings {
+        window_title: w!("AlwaysOn コントロールパネル"),
+        settings_title: "設定",
+        hero_title: "スリープ防止",
+        hero_active_forever: "有効 • 常時スリープ防止",
+        hero_off: "無効 • 通常スリープ",
+        hero_remaining_prefix: "残り時間",
+        section_mode: "動作モード",
+        mode_forever: "常時オン",
+        mode_30m: "30 分",
+        mode_1h: "1 時間",
+        mode_3h: "3 時間",
+        section_display: "画面と電源",
+        display_title: "画面も点灯したままにする",
+        display_sub: "モニターの消灯を防止します",
+        section_startup: "スタートアップ",
+        startup_title: "Windows 起動時に実行",
+        startup_sub: "サインイン時に自動起動",
+        section_close: "閉じるボタン (\u{2715})",
+        close_desc_tray: "タスクトレイに最小化（バックグラウンド）",
+        close_desc_exit: "アプリケーションを完全に終了",
+        close_opt_tray: "トレイに最小化",
+        close_opt_exit: "アプリを終了",
+        section_theme: "アプリテーマ",
+        theme_desc_system_dark: "システムテーマ検出（ダーク）",
+        theme_desc_system_light: "システムテーマ検出（ライト）",
+        theme_desc_light: "ライトテーマ選択中",
+        theme_desc_dark: "ダークテーマ選択中",
+        theme_opt_light: "ライト",
+        theme_opt_dark: "ダーク",
+        section_lang: "アプリ言語",
+        lang_desc_system_prefix: "システム言語を検出",
+        lang_desc_selected: "日本語インターフェース選択中",
+        lang_opt_system: "システム",
+        tray_inactive: "AlwaysOn: 停止",
+        tray_active: "AlwaysOn: 有効",
+        notify_activated: "AlwaysOn を有効にしました。",
+        notify_deactivated: "AlwaysOn を無効にしました。",
+        notify_timeout: "タイマー終了、スリープ防止を解除しました。",
+        menu_open: w!("パネルを開く"),
+        menu_off: w!("オフ（通常スリープ）"),
+        menu_forever: w!("常時オン"),
+        menu_30m: w!("30 分間オンにする"),
+        menu_1h: w!("1 時間オンにする"),
+        menu_3h: w!("3 時間オンにする"),
+        menu_auto: w!("スタートアップ時に実行"),
+        menu_exit: w!("終了"),
+    },
+    // 10: 한국어
+    UiStrings {
+        window_title: w!("AlwaysOn 제어판"),
+        settings_title: "설정",
+        hero_title: "절전 방지",
+        hero_active_forever: "활성 • 항상 켜짐",
+        hero_off: "꺼짐 • 일반 절전 모드",
+        hero_remaining_prefix: "남은 시간",
+        section_mode: "실행 모드",
+        mode_forever: "항상 유지",
+        mode_30m: "30분",
+        mode_1h: "1시간",
+        mode_3h: "3시간",
+        section_display: "디스플레이 및 전원",
+        display_title: "화면도 켜진 상태로 유지",
+        display_sub: "모니터가 꺼지지 않도록 방지",
+        section_startup: "시작 프로그램",
+        startup_title: "Windows 시작 시 실행",
+        startup_sub: "로그인 시 자동으로 시작",
+        section_close: "닫기 버튼 (\u{2715})",
+        close_desc_tray: "시스템 트레이로 최소화(백그라운드)",
+        close_desc_exit: "애플리케이션 완전히 종료",
+        close_opt_tray: "트레이로 최소화",
+        close_opt_exit: "앱 종료",
+        section_theme: "앱 테마",
+        theme_desc_system_dark: "시스템 테마 감지됨 (다크)",
+        theme_desc_system_light: "시스템 테마 감지됨 (라이트)",
+        theme_desc_light: "라이트 테마 선택됨",
+        theme_desc_dark: "다크 테마 선택됨",
+        theme_opt_light: "라이트",
+        theme_opt_dark: "다크",
+        section_lang: "앱 언어",
+        lang_desc_system_prefix: "시스템 언어 감지됨",
+        lang_desc_selected: "한국어 인터페이스 선택됨",
+        lang_opt_system: "시스템",
+        tray_inactive: "AlwaysOn: 꺼짐",
+        tray_active: "AlwaysOn: 활성",
+        notify_activated: "AlwaysOn이 활성화되었습니다.",
+        notify_deactivated: "AlwaysOn이 비활성화되었습니다.",
+        notify_timeout: "타이머가 종료되어 절전 방지가 해제되었습니다.",
+        menu_open: w!("제어판 열기"),
+        menu_off: w!("끄기 (일반 절전)"),
+        menu_forever: w!("항상 켜기"),
+        menu_30m: w!("30분 동안 켜기"),
+        menu_1h: w!("1시간 동안 켜기"),
+        menu_3h: w!("3시간 동안 켜기"),
+        menu_auto: w!("시작 시 자동 실행"),
+        menu_exit: w!("종료"),
+    },
+];
 
 struct AppState {
     mode: Mode,
@@ -99,7 +743,9 @@ struct AppState {
     hicon_hero_awake: HICON,
     hicon_hero_sleep: HICON,
     lang_pref: LangPref,
-    lang_tr: bool,
+    lang: Lang,
+    theme_pref: ThemePref,
+    is_light_theme: bool,
     wm_taskbar_created: u32,
     keep_display_on: bool,
     close_to_tray: bool,
@@ -116,7 +762,9 @@ struct AppState {
     anim_mode_idx: f32,
     anim_mode_alpha: f32,
     anim_close_opt: f32,
-    anim_lang_idx: f32,
+    anim_theme_opt: f32,
+    anim_lang_col: f32,
+    anim_lang_row: f32,
     anim_view_slide: f32,
     anim_open_progress: f32,
     target_win_x: i32,
@@ -130,7 +778,9 @@ static mut STATE: AppState = AppState {
     hicon_hero_awake: HICON(std::ptr::null_mut()),
     hicon_hero_sleep: HICON(std::ptr::null_mut()),
     lang_pref: LangPref::System,
-    lang_tr: false,
+    lang: Lang::En,
+    theme_pref: ThemePref::System,
+    is_light_theme: false,
     wm_taskbar_created: 0,
     keep_display_on: true,
     close_to_tray: true,
@@ -147,7 +797,9 @@ static mut STATE: AppState = AppState {
     anim_mode_idx: 0.0,
     anim_mode_alpha: 1.0,
     anim_close_opt: 0.0,
-    anim_lang_idx: 0.0,
+    anim_theme_opt: 0.0,
+    anim_lang_col: 0.0,
+    anim_lang_row: 0.0,
     anim_view_slide: 0.0,
     anim_open_progress: 1.0,
     target_win_x: 0,
@@ -257,27 +909,18 @@ unsafe fn apply_execution_state(active: bool) {
 
 fn tray_tooltip_text() -> String {
     unsafe {
+        let s = ui_strings(STATE.lang);
         let active = STATE.mode != Mode::Off;
         if !active {
-            return if STATE.lang_tr {
-                "AlwaysOn: Kapalı".to_string()
-            } else {
-                "AlwaysOn: Inactive".to_string()
-            };
+            return s.tray_inactive.to_string();
         }
         if STATE.remaining_secs > 0 {
             let h = STATE.remaining_secs / 3600;
             let m = (STATE.remaining_secs % 3600) / 60;
-            let s = STATE.remaining_secs % 60;
-            if STATE.lang_tr {
-                format!("AlwaysOn: Aktif ({h:02}:{m:02}:{s:02})")
-            } else {
-                format!("AlwaysOn: Active ({h:02}:{m:02}:{s:02})")
-            }
-        } else if STATE.lang_tr {
-            "AlwaysOn: Aktif".to_string()
+            let sec = STATE.remaining_secs % 60;
+            format!("{} ({h:02}:{m:02}:{sec:02})", s.tray_active)
         } else {
-            "AlwaysOn: Active".to_string()
+            s.tray_active.to_string()
         }
     }
 }
@@ -548,45 +1191,123 @@ unsafe fn write_reg_dword(name: PCWSTR, val: u32) {
 
 fn lang_pref_from_dword(val: u32) -> LangPref {
     match val {
-        1 => LangPref::Turkish,
-        2 => LangPref::English,
+        1 => LangPref::Tr,
+        2 => LangPref::En,
+        3 => LangPref::De,
+        4 => LangPref::Fr,
+        5 => LangPref::Es,
+        6 => LangPref::It,
+        7 => LangPref::Pt,
+        8 => LangPref::Ru,
+        9 => LangPref::Zh,
+        10 => LangPref::Ja,
+        11 => LangPref::Ko,
         _ => LangPref::System,
     }
 }
 
-fn lang_to_index(pref: LangPref) -> f32 {
+fn lang_from_primary_lang_id(primary: u16) -> Lang {
+    match primary {
+        0x1F => Lang::Tr,
+        0x09 => Lang::En,
+        0x07 => Lang::De,
+        0x0C => Lang::Fr,
+        0x0A => Lang::Es,
+        0x10 => Lang::It,
+        0x16 => Lang::Pt,
+        0x19 => Lang::Ru,
+        0x04 => Lang::Zh,
+        0x11 => Lang::Ja,
+        0x12 => Lang::Ko,
+        _ => Lang::En,
+    }
+}
+
+fn system_detected_lang() -> Lang {
+    lang_from_primary_lang_id(unsafe { GetUserDefaultUILanguage() & 0x3FF })
+}
+
+fn resolve_lang(pref: LangPref, sys_lang: Lang) -> Lang {
     match pref {
-        LangPref::System => 0.0,
-        LangPref::Turkish => 1.0,
-        LangPref::English => 2.0,
+        LangPref::System => sys_lang,
+        LangPref::Tr => Lang::Tr,
+        LangPref::En => Lang::En,
+        LangPref::De => Lang::De,
+        LangPref::Fr => Lang::Fr,
+        LangPref::Es => Lang::Es,
+        LangPref::It => Lang::It,
+        LangPref::Pt => Lang::Pt,
+        LangPref::Ru => Lang::Ru,
+        LangPref::Zh => Lang::Zh,
+        LangPref::Ja => Lang::Ja,
+        LangPref::Ko => Lang::Ko,
     }
 }
 
-fn system_is_turkish() -> bool {
-    unsafe { (GetUserDefaultUILanguage() & 0x3FF) == 0x1F }
+#[inline]
+fn lang_grid_pos(pref: LangPref) -> (f32, f32) {
+    let idx = pref as usize;
+    ((idx % 4) as f32, (idx / 4) as f32)
 }
 
-fn resolve_lang_tr(pref: LangPref, sys_is_tr: bool) -> bool {
+#[inline]
+fn ui_strings(lang: Lang) -> &'static UiStrings {
+    &UI_STRINGS[lang as usize]
+}
+
+fn theme_pref_from_dword(val: u32) -> ThemePref {
+    match val {
+        1 => ThemePref::Light,
+        2 => ThemePref::Dark,
+        _ => ThemePref::System,
+    }
+}
+
+unsafe fn system_uses_light_theme() -> bool {
+    let mut hkey = HKEY::default();
+    if RegOpenKeyExW(HKEY_CURRENT_USER, PERSONALIZE_KEY_PATH, 0, KEY_READ, &mut hkey).is_err() {
+        return false;
+    }
+    let mut val: u32 = 0;
+    let mut len: u32 = mem::size_of::<u32>() as u32;
+    let mut kind = REG_VALUE_TYPE::default();
+    let ok = RegQueryValueExW(
+        hkey,
+        REG_APPS_USE_LIGHT_THEME,
+        None,
+        Some(&mut kind),
+        Some(&mut val as *mut u32 as *mut u8),
+        Some(&mut len),
+    )
+    .is_ok()
+        && kind == REG_DWORD;
+    let _ = RegCloseKey(hkey);
+    ok && val != 0
+}
+
+#[inline]
+fn resolve_is_light_theme(pref: ThemePref, sys_light: bool) -> bool {
     match pref {
-        LangPref::System => sys_is_tr,
-        LangPref::Turkish => true,
-        LangPref::English => false,
+        ThemePref::System => sys_light,
+        ThemePref::Light => true,
+        ThemePref::Dark => false,
     }
 }
 
-fn app_window_title(lang_tr: bool) -> PCWSTR {
-    if lang_tr {
-        w!("AlwaysOn Kontrol Paneli")
-    } else {
-        w!("AlwaysOn Control Panel")
-    }
+unsafe fn set_theme_pref(hwnd: HWND, pref: ThemePref) {
+    STATE.theme_pref = pref;
+    STATE.is_light_theme = resolve_is_light_theme(pref, system_uses_light_theme());
+    write_reg_dword(REG_THEME, pref as u32);
+    apply_dwm_winui(hwnd);
+    start_ui_anim(hwnd);
+    let _ = InvalidateRect(hwnd, None, false);
 }
 
 unsafe fn set_language_pref(hwnd: HWND, pref: LangPref) {
     STATE.lang_pref = pref;
-    STATE.lang_tr = resolve_lang_tr(pref, system_is_turkish());
+    STATE.lang = resolve_lang(pref, system_detected_lang());
     write_reg_dword(REG_LANGUAGE, pref as u32);
-    let _ = SetWindowTextW(hwnd, app_window_title(STATE.lang_tr));
+    let _ = SetWindowTextW(hwnd, ui_strings(STATE.lang).window_title);
     update_tray_tooltip_only(hwnd);
     start_ui_anim(hwnd);
     let _ = InvalidateRect(hwnd, None, false);
@@ -596,7 +1317,9 @@ unsafe fn load_app_settings() {
     STATE.close_to_tray = read_reg_dword(REG_CLOSE_TO_TRAY, 1) != 0;
     STATE.keep_display_on = read_reg_dword(REG_KEEP_DISPLAY_ON, 1) != 0;
     STATE.lang_pref = lang_pref_from_dword(read_reg_dword(REG_LANGUAGE, 0));
-    STATE.lang_tr = resolve_lang_tr(STATE.lang_pref, system_is_turkish());
+    STATE.lang = resolve_lang(STATE.lang_pref, system_detected_lang());
+    STATE.theme_pref = theme_pref_from_dword(read_reg_dword(REG_THEME, 0));
+    STATE.is_light_theme = resolve_is_light_theme(STATE.theme_pref, system_uses_light_theme());
     STATE.autostart_cached = is_autostart();
     sync_anim_immediately();
 }
@@ -633,7 +1356,10 @@ unsafe fn sync_anim_immediately() {
     STATE.anim_mode_idx = mode_to_index(STATE.mode, 0.0);
     STATE.anim_mode_alpha = if STATE.mode != Mode::Off { 1.0 } else { 0.0 };
     STATE.anim_close_opt = if STATE.close_to_tray { 0.0 } else { 1.0 };
-    STATE.anim_lang_idx = lang_to_index(STATE.lang_pref);
+    STATE.anim_theme_opt = (STATE.theme_pref as u32) as f32;
+    let (lcol, lrow) = lang_grid_pos(STATE.lang_pref);
+    STATE.anim_lang_col = lcol;
+    STATE.anim_lang_row = lrow;
     STATE.anim_view_slide = 0.0;
     STATE.anim_open_progress = 1.0;
 }
@@ -655,7 +1381,8 @@ unsafe fn step_ui_anim(hwnd: HWND) {
     let mode_idx_target = mode_to_index(STATE.mode, STATE.anim_mode_idx);
     let mode_alpha_target = if STATE.mode != Mode::Off { 1.0 } else { 0.0 };
     let close_opt_target = if STATE.close_to_tray { 0.0 } else { 1.0 };
-    let lang_idx_target = lang_to_index(STATE.lang_pref);
+    let theme_opt_target = (STATE.theme_pref as u32) as f32;
+    let (lang_col_target, lang_row_target) = lang_grid_pos(STATE.lang_pref);
 
     let mut hero_val = STATE.anim_hero_toggle;
     any_changed |= lerp_step(&mut hero_val, hero_target, speed);
@@ -681,9 +1408,17 @@ unsafe fn step_ui_anim(hwnd: HWND) {
     any_changed |= lerp_step(&mut close_val, close_opt_target, speed);
     STATE.anim_close_opt = close_val;
 
-    let mut lang_val = STATE.anim_lang_idx;
-    any_changed |= lerp_step(&mut lang_val, lang_idx_target, speed);
-    STATE.anim_lang_idx = lang_val;
+    let mut theme_val = STATE.anim_theme_opt;
+    any_changed |= lerp_step(&mut theme_val, theme_opt_target, speed);
+    STATE.anim_theme_opt = theme_val;
+
+    let mut lang_col_val = STATE.anim_lang_col;
+    any_changed |= lerp_step(&mut lang_col_val, lang_col_target, speed);
+    STATE.anim_lang_col = lang_col_val;
+
+    let mut lang_row_val = STATE.anim_lang_row;
+    any_changed |= lerp_step(&mut lang_row_val, lang_row_target, speed);
+    STATE.anim_lang_row = lang_row_val;
 
     let mut view_val = STATE.anim_view_slide;
     any_changed |= lerp_step(&mut view_val, 0.0, speed);
@@ -885,11 +1620,16 @@ unsafe fn apply_dwm_winui(hwnd: HWND) {
         }
         if let Some(proc) = GetProcAddress(dwmapi, s!("DwmSetWindowAttribute")) {
             let set_attr: DwmSetWindowAttributeFn = mem::transmute(proc);
-            let dark: i32 = 1;
+            let light = STATE.is_light_theme;
+            let dark: i32 = if light { 0 } else { 1 };
             let _ = set_attr(hwnd, 20, &dark as *const i32 as *const c_void, 4);
             let corner_round: i32 = 2;
             let _ = set_attr(hwnd, 33, &corner_round as *const i32 as *const c_void, 4);
-            let border_color: u32 = rgb(52, 52, 52).0;
+            let border_color: u32 = if light {
+                rgb(214, 214, 214).0
+            } else {
+                rgb(52, 52, 52).0
+            };
             let _ = set_attr(hwnd, 34, &border_color as *const u32 as *const c_void, 4);
             let backdrop: i32 = 4; // DWMSBT_TABBEDWINDOW (Mica Alt)
             let _ = set_attr(hwnd, 38, &backdrop as *const i32 as *const c_void, 4);
@@ -1018,33 +1758,39 @@ fn hit_test_ui(lx: i32, ly: i32) -> usize {
     }
     if in_settings {
         if in_rect(lx, ly, 12, 5, 32, 28) {
-            HIT_BTN_BACK
-        } else if in_rect(lx, ly, 16, 58, 328, 52) {
-            HIT_TOGGLE_AUTOSTART
-        } else if in_rect(lx, ly, 32, 166, 146, 32) {
-            HIT_CLOSE_TO_TRAY
-        } else if in_rect(lx, ly, 182, 166, 146, 32) {
-            HIT_CLOSE_EXIT
-        } else if in_rect(lx, ly, 32, 264, 96, 32) {
-            HIT_LANG_SYSTEM
-        } else if in_rect(lx, ly, 132, 264, 96, 32) {
-            HIT_LANG_TR
-        } else if in_rect(lx, ly, 232, 264, 96, 32) {
-            HIT_LANG_EN
-        } else {
-            HIT_NONE
+            return HIT_BTN_BACK;
+        } else if in_rect(lx, ly, 16, 52, 328, 44) {
+            return HIT_TOGGLE_AUTOSTART;
+        } else if in_rect(lx, ly, 32, 140, 146, 25) {
+            return HIT_CLOSE_TO_TRAY;
+        } else if in_rect(lx, ly, 182, 140, 146, 25) {
+            return HIT_CLOSE_EXIT;
+        } else if in_rect(lx, ly, 32, 216, 96, 25) {
+            return HIT_THEME_SYSTEM;
+        } else if in_rect(lx, ly, 132, 216, 96, 25) {
+            return HIT_THEME_LIGHT;
+        } else if in_rect(lx, ly, 232, 216, 96, 25) {
+            return HIT_THEME_DARK;
         }
-    } else if in_rect(lx, ly, 16, 44, 328, 72) {
+        for idx in 0..12usize {
+            let col = (idx % 4) as i32;
+            let row = (idx / 4) as i32;
+            if in_rect(lx, ly, 30 + col * 76, 293 + row * 26, 72, 23) {
+                return HIT_LANG_BASE + idx;
+            }
+        }
+        HIT_NONE
+    } else if in_rect(lx, ly, 16, 52, 328, 86) {
         HIT_HERO
-    } else if in_rect(lx, ly, 20, 154, 78, 36) {
+    } else if in_rect(lx, ly, 20, 180, 78, 40) {
         HIT_MODE_FOREVER
-    } else if in_rect(lx, ly, 100, 154, 78, 36) {
+    } else if in_rect(lx, ly, 100, 180, 78, 40) {
         HIT_MODE_30M
-    } else if in_rect(lx, ly, 180, 154, 78, 36) {
+    } else if in_rect(lx, ly, 180, 180, 78, 40) {
         HIT_MODE_1H
-    } else if in_rect(lx, ly, 260, 154, 78, 36) {
+    } else if in_rect(lx, ly, 260, 180, 78, 40) {
         HIT_MODE_3H
-    } else if in_rect(lx, ly, 16, 228, 328, 58) {
+    } else if in_rect(lx, ly, 16, 264, 328, 72) {
         HIT_TOGGLE_DISPLAY
     } else {
         HIT_NONE
@@ -1091,10 +1837,13 @@ impl<'a> SdfCanvas<'a> {
         out + inside - r
     }
 
-    fn fill_winui_base(&mut self) {
-        // Premultiplied #1F1F1F at 94% opacity so Mica Alt tints lightly while staying crisp in all states
-        let a: u32 = 240;
-        let ch: u32 = (31 * a + 127) / 255;
+    fn fill_winui_base(&mut self, light: bool) {
+        let (a, rgb_v): (u32, u32) = if light {
+            (245, 243) // #F3F3F3 WinUI 3 Light Mica Alt
+        } else {
+            (240, 31) // #1F1F1F WinUI 3 Dark Mica Alt
+        };
+        let ch: u32 = (rgb_v * a + 127) / 255;
         let pix = (a << 24) | (ch << 16) | (ch << 8) | ch;
         self.buf.fill(pix);
     }
@@ -1195,14 +1944,35 @@ impl<'a> SdfCanvas<'a> {
         }
     }
 
-    fn draw_winui_toggle(&mut self, lx: f32, ly: f32, lw: f32, lh: f32, t: f32) {
+    fn draw_winui_toggle(&mut self, lx: f32, ly: f32, lw: f32, lh: f32, t: f32, light: bool) {
         let t = t.clamp(0.0, 1.0);
         let lerp_u8 = |a: u8, b: u8| -> u8 {
             ((a as f32) + ((b as f32) - (a as f32)) * t)
                 .round()
                 .clamp(0.0, 255.0) as u8
         };
-        let track_col = [lerp_u8(35, 76), lerp_u8(35, 194), lerp_u8(35, 255)];
+        let (off_track, on_track, off_border, off_thumb, on_thumb) = if light {
+            (
+                [238u8, 238, 238],
+                [0u8, 103, 192],
+                [134u8, 134, 134],
+                [92u8, 92, 92],
+                [255u8, 255, 255],
+            )
+        } else {
+            (
+                [35u8, 35, 35],
+                [76u8, 194, 255],
+                [138u8, 138, 138],
+                [200u8, 200, 200],
+                [20u8, 20, 20],
+            )
+        };
+        let track_col = [
+            lerp_u8(off_track[0], on_track[0]),
+            lerp_u8(off_track[1], on_track[1]),
+            lerp_u8(off_track[2], on_track[2]),
+        ];
         let r = lh * 0.5;
         self.draw_round_card(
             lx,
@@ -1212,7 +1982,7 @@ impl<'a> SdfCanvas<'a> {
             r,
             track_col,
             1.0,
-            [138, 138, 138],
+            off_border,
             1.0 - t,
         );
 
@@ -1221,7 +1991,11 @@ impl<'a> SdfCanvas<'a> {
         let kw = kh + stretch;
         let kx = lx + 4.5 + t * (lw - 8.5 - kw) + stretch * 0.5 - stretch * t;
         let ky = ly + (lh - kh) * 0.5;
-        let thumb_col = [lerp_u8(200, 20), lerp_u8(200, 20), lerp_u8(200, 20)];
+        let thumb_col = [
+            lerp_u8(off_thumb[0], on_thumb[0]),
+            lerp_u8(off_thumb[1], on_thumb[1]),
+            lerp_u8(off_thumb[2], on_thumb[2]),
+        ];
         self.draw_round_card(kx, ky, kw, kh, kh * 0.5, thumb_col, 1.0, thumb_col, 0.0);
     }
 
@@ -1354,6 +2128,7 @@ unsafe fn draw_glass_text(
     SelectObject(text_dc, old_font);
     let _ = GdiFlush();
 
+    let is_dark_ink = (col[0] as u16 + col[1] as u16 + col[2] as u16) < 300;
     for py in y0..y1 {
         let off = (py as usize) * (canvas.w as usize);
         for px in x0..x1 {
@@ -1362,7 +2137,10 @@ unsafe fn draw_glass_text(
                 let r = ((pix >> 16) & 0xFF) as f32;
                 let g = ((pix >> 8) & 0xFF) as f32;
                 let b = (pix & 0xFF) as f32;
-                let lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
+                let mut lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255.0;
+                if is_dark_ink {
+                    lum = lum.sqrt() * 0.35 + lum * 0.65;
+                }
                 if lum > 0.004 {
                     canvas.blend_px(px, py, col[0], col[1], col[2], alpha * lum);
                 }
@@ -1371,120 +2149,82 @@ unsafe fn draw_glass_text(
     }
 }
 
-struct SettingsSelectorSpec<'a> {
-    section_title: &'a str,
-    section_y: i32,
-    card_y: f32,
-    glyph: &'a str,
-    status_text: &'a str,
-    anim_idx: f32,
-    step_x: f32,
-    pill_w: f32,
-    accent_w: f32,
-    opts: &'a [(usize, bool, f32, &'a str)],
+struct ThemePalette {
+    is_light: bool,
+    card_fill: [u8; 3],
+    card_hover: [u8; 3],
+    card_border: [u8; 3],
+    card_border_active: [u8; 3],
+    track_fill: [u8; 3],
+    track_border: [u8; 3],
+    pill_fill: [u8; 3],
+    pill_border: [u8; 3],
+    pill_hover: [u8; 3],
+    btn_hover: [u8; 3],
+    btn_active_bg: [u8; 3],
+    btn_active_border: [u8; 3],
+    accent: [u8; 3],
+    accent_text: [u8; 3],
+    text_primary: [u8; 3],
+    text_selected: [u8; 3],
+    text_secondary: [u8; 3],
+    text_muted: [u8; 3],
+    text_caption: [u8; 3],
+    icon_fg: [u8; 3],
+    icon_caption: [u8; 3],
 }
 
-#[allow(clippy::too_many_arguments)]
-unsafe fn draw_settings_selector(
-    canvas: &mut SdfCanvas<'_>,
-    text_dc: HDC,
-    text_buf: &mut [u32],
-    dpi: i32,
-    vx_i: i32,
-    hover: usize,
-    font_section: HFONT,
-    font_fluent_gear: HFONT,
-    font_sub: HFONT,
-    font_body: HFONT,
-    font_body_bold: HFONT,
-    spec: &SettingsSelectorSpec<'_>,
-) {
-    let vx = vx_i as f32;
-    let card_yi = spec.card_y as i32;
-    draw_glass_text(
-        canvas,
-        text_dc,
-        text_buf,
-        spec.section_title,
-        18 + vx_i,
-        spec.section_y,
-        260,
-        16,
-        dpi,
-        font_section,
-        [158, 158, 158],
-        1.0,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
-    );
-
-    canvas.draw_round_card(16.0 + vx, spec.card_y, 328.0, 74.0, 8.0, [43, 43, 43], 1.0, [58, 58, 58], 1.0);
-    draw_glass_text(
-        canvas,
-        text_dc,
-        text_buf,
-        spec.glyph,
-        28 + vx_i,
-        card_yi + 6,
-        24,
-        20,
-        dpi,
-        font_fluent_gear,
-        [224, 224, 224],
-        1.0,
-        DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-    );
-    draw_glass_text(
-        canvas,
-        text_dc,
-        text_buf,
-        spec.status_text,
-        56 + vx_i,
-        card_yi + 6,
-        276,
-        18,
-        dpi,
-        font_sub,
-        [96, 205, 255],
-        1.0,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE,
-    );
-
-    canvas.draw_round_card(28.0 + vx, spec.card_y + 28.0, 304.0, 40.0, 6.0, [32, 32, 32], 1.0, [54, 54, 54], 1.0);
-    for &(hid, selected, ox, _) in spec.opts {
-        if hover == hid && !selected {
-            canvas.draw_round_card(ox + vx, spec.card_y + 32.0, spec.pill_w, 32.0, 5.0, [46, 46, 46], 1.0, [46, 46, 46], 0.0);
+const fn theme_palette(light: bool) -> ThemePalette {
+    if light {
+        ThemePalette {
+            is_light: true,
+            card_fill: [252, 252, 252],
+            card_hover: [247, 247, 247],
+            card_border: [224, 224, 224],
+            card_border_active: [120, 178, 228],
+            track_fill: [241, 241, 241],
+            track_border: [222, 222, 222],
+            pill_fill: [255, 255, 255],
+            pill_border: [206, 206, 206],
+            pill_hover: [232, 232, 232],
+            btn_hover: [230, 230, 230],
+            btn_active_bg: [235, 235, 235],
+            btn_active_border: [206, 206, 206],
+            accent: [0, 103, 192],
+            accent_text: [0, 95, 184],
+            text_primary: [27, 27, 27],
+            text_selected: [16, 16, 16],
+            text_secondary: [82, 82, 82],
+            text_muted: [102, 102, 102],
+            text_caption: [28, 28, 28],
+            icon_fg: [48, 48, 48],
+            icon_caption: [56, 56, 56],
         }
-    }
-    let active_x = 32.0 + spec.anim_idx * spec.step_x + vx;
-    canvas.draw_round_card(active_x, spec.card_y + 32.0, spec.pill_w, 32.0, 5.0, [56, 56, 56], 1.0, [70, 70, 70], 1.0);
-    canvas.draw_round_card(
-        active_x + (spec.pill_w - spec.accent_w) * 0.5,
-        spec.card_y + 60.5,
-        spec.accent_w,
-        2.5,
-        1.25,
-        [76, 194, 255],
-        1.0,
-        [76, 194, 255],
-        0.0,
-    );
-
-    for &(_, selected, ox, label) in spec.opts {
-        draw_glass_text(
-            canvas,
-            text_dc,
-            text_buf,
-            label,
-            ox as i32 + vx_i,
-            card_yi + 31,
-            spec.pill_w as i32,
-            29,
-            dpi,
-            if selected { font_body_bold } else { font_body },
-            if selected { [255, 255, 255] } else { [196, 196, 196] },
-            1.0,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-        );
+    } else {
+        ThemePalette {
+            is_light: false,
+            card_fill: [43, 43, 43],
+            card_hover: [50, 50, 50],
+            card_border: [58, 58, 58],
+            card_border_active: [56, 120, 168],
+            track_fill: [32, 32, 32],
+            track_border: [54, 54, 54],
+            pill_fill: [56, 56, 56],
+            pill_border: [70, 70, 70],
+            pill_hover: [46, 46, 46],
+            btn_hover: [46, 46, 46],
+            btn_active_bg: [52, 52, 52],
+            btn_active_border: [68, 68, 68],
+            accent: [76, 194, 255],
+            accent_text: [96, 205, 255],
+            text_primary: [243, 243, 243],
+            text_selected: [255, 255, 255],
+            text_secondary: [196, 196, 196],
+            text_muted: [158, 158, 158],
+            text_caption: [230, 230, 230],
+            icon_fg: [224, 224, 224],
+            icon_caption: [214, 214, 214],
+        }
     }
 }
 
@@ -1514,13 +2254,15 @@ unsafe fn paint_control_panel(hwnd: HWND) {
     let main_buf = std::slice::from_raw_parts_mut(PAINT_CACHE.main_ptr, total_px);
     let text_buf = std::slice::from_raw_parts_mut(PAINT_CACHE.text_ptr, total_px);
 
-    let tr = STATE.lang_tr;
+    let ui = ui_strings(STATE.lang);
     let active = STATE.mode != Mode::Off;
     let hover = STATE.hover_item;
     let rem = STATE.remaining_secs;
     let in_settings = STATE.in_settings;
     let close_to_tray = STATE.close_to_tray;
     let lang_pref = STATE.lang_pref;
+    let theme_pref = STATE.theme_pref;
+    let pal = theme_palette(STATE.is_light_theme);
     let vx_i = (STATE.anim_view_slide * 12.0).round() as i32;
     let vx = vx_i as f32;
 
@@ -1542,8 +2284,8 @@ unsafe fn paint_control_panel(hwnd: HWND) {
             s,
         };
 
-        // 1. WinUI 3 Dark Surface Base (#1F1F1F with subtle Mica transparency)
-        canvas.fill_winui_base();
+        // 1. WinUI 3 Surface Base (#F3F3F3 Light / #1F1F1F Dark with Mica Alt blend)
+        canvas.fill_winui_base(pal.is_light);
 
         let mug_rgba = if active { MUG_AWAKE_RGBA } else { MUG_SLEEP_RGBA };
 
@@ -1551,19 +2293,19 @@ unsafe fn paint_control_panel(hwnd: HWND) {
         if !in_settings {
             canvas.draw_rgba_icon(mug_rgba, 16.0, 9.0, 20.0, 20.0);
         } else if hover == HIT_BTN_BACK {
-            canvas.draw_round_card(12.0, 5.0, 32.0, 28.0, 4.0, [46, 46, 46], 1.0, [46, 46, 46], 0.0);
+            canvas.draw_round_card(12.0, 5.0, 32.0, 28.0, 4.0, pal.btn_hover, 1.0, pal.btn_hover, 0.0);
         }
 
         // Settings Gear Button (236, 5, 36, 28)
         if in_settings {
-            canvas.draw_round_card(236.0, 5.0, 36.0, 28.0, 4.0, [52, 52, 52], 1.0, [68, 68, 68], 1.0);
-            canvas.draw_round_card(246.0, 30.0, 16.0, 2.5, 1.25, [76, 194, 255], 1.0, [76, 194, 255], 0.0);
+            canvas.draw_round_card(236.0, 5.0, 36.0, 28.0, 4.0, pal.btn_active_bg, 1.0, pal.btn_active_border, 1.0);
+            canvas.draw_round_card(246.0, 30.0, 16.0, 2.5, 1.25, pal.accent, 1.0, pal.accent, 0.0);
         } else if hover == HIT_BTN_SETTINGS {
-            canvas.draw_round_card(236.0, 5.0, 36.0, 28.0, 4.0, [46, 46, 46], 1.0, [46, 46, 46], 0.0);
+            canvas.draw_round_card(236.0, 5.0, 36.0, 28.0, 4.0, pal.btn_hover, 1.0, pal.btn_hover, 0.0);
         }
         // Minimize Caption Button (276, 5, 36, 28)
         if hover == HIT_BTN_HIDE {
-            canvas.draw_round_card(276.0, 5.0, 36.0, 28.0, 4.0, [46, 46, 46], 1.0, [46, 46, 46], 0.0);
+            canvas.draw_round_card(276.0, 5.0, 36.0, 28.0, 4.0, pal.btn_hover, 1.0, pal.btn_hover, 0.0);
         }
         // Close Caption Button (316, 5, 36, 28)
         if hover == HIT_BTN_EXIT {
@@ -1583,7 +2325,7 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 20,
                 dpi,
                 font_caption,
-                [230, 230, 230],
+                pal.text_caption,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -1599,7 +2341,7 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 28,
                 dpi,
                 font_fluent_gear,
-                [230, 230, 230],
+                pal.text_caption,
                 1.0,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE,
             );
@@ -1607,14 +2349,14 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Ayarlar" } else { "Settings" },
+                ui.settings_title,
                 48,
                 8,
                 160,
                 22,
                 dpi,
                 font_body_bold,
-                [245, 245, 245],
+                pal.text_primary,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -1632,7 +2374,7 @@ unsafe fn paint_control_panel(hwnd: HWND) {
             28,
             dpi,
             font_fluent_gear,
-            if in_settings { [76, 194, 255] } else { [214, 214, 214] },
+            if in_settings { pal.accent } else { pal.icon_caption },
             1.0,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE,
         );
@@ -1647,7 +2389,7 @@ unsafe fn paint_control_panel(hwnd: HWND) {
             28,
             dpi,
             font_fluent_sm,
-            [214, 214, 214],
+            pal.icon_caption,
             1.0,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE,
         );
@@ -1662,32 +2404,33 @@ unsafe fn paint_control_panel(hwnd: HWND) {
             28,
             dpi,
             font_fluent_sm,
-            if hover == HIT_BTN_EXIT { [255, 255, 255] } else { [214, 214, 214] },
+            if hover == HIT_BTN_EXIT { [255, 255, 255] } else { pal.icon_caption },
             1.0,
             DT_CENTER | DT_VCENTER | DT_SINGLELINE,
         );
 
         if in_settings {
-            // === SETTINGS VIEW ===
+            // === SETTINGS VIEW (360 x 388) ===
+            // Section 1: Startup
             draw_glass_text(
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Başlangıç" } else { "Startup" },
+                ui.section_startup,
                 18 + vx_i,
-                40,
+                35,
                 200,
                 16,
                 dpi,
                 font_section,
-                [158, 158, 158],
+                pal.text_muted,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
 
-            let auto_fill = if hover == HIT_TOGGLE_AUTOSTART { [50, 50, 50] } else { [43, 43, 43] };
-            canvas.draw_round_card(16.0 + vx, 58.0, 328.0, 52.0, 8.0, auto_fill, 1.0, [58, 58, 58], 1.0);
-            canvas.draw_winui_toggle(286.0 + vx, 74.0, 40.0, 20.0, STATE.anim_auto_toggle);
+            let auto_fill = if hover == HIT_TOGGLE_AUTOSTART { pal.card_hover } else { pal.card_fill };
+            canvas.draw_round_card(16.0 + vx, 52.0, 328.0, 44.0, 8.0, auto_fill, 1.0, pal.card_border, 1.0);
+            canvas.draw_winui_toggle(286.0 + vx, 64.0, 40.0, 20.0, STATE.anim_auto_toggle, pal.is_light);
 
             draw_glass_text(
                 &mut canvas,
@@ -1695,12 +2438,12 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 text_buf,
                 "\u{E7B5}",
                 28 + vx_i,
-                58,
-                24,
                 52,
+                24,
+                44,
                 dpi,
                 font_fluent,
-                [224, 224, 224],
+                pal.icon_fg,
                 1.0,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE,
             );
@@ -1708,14 +2451,14 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Windows başlangıcında çalıştır" } else { "Run at Windows startup" },
+                ui.startup_title,
                 60 + vx_i,
-                65,
+                56,
                 216,
                 18,
                 dpi,
                 font_body,
-                [243, 243, 243],
+                pal.text_primary,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -1723,182 +2466,362 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Oturum açıldığında otomatik başlar" } else { "Launch automatically at sign-in" },
+                ui.startup_sub,
                 60 + vx_i,
-                84,
+                74,
                 216,
                 16,
                 dpi,
                 font_sub,
-                [158, 158, 158],
+                pal.text_muted,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
 
-            let close_desc = if close_to_tray {
-                if tr {
-                    "Sistem tepsisine küçültülür (arka planda çalışır)"
-                } else {
-                    "Minimizes to system tray (runs in background)"
-                }
-            } else if tr {
-                "Uygulama tamamen kapatılır"
-            } else {
-                "Closes the application completely"
-            };
-            let close_opts: [(usize, bool, f32, &str); 2] = [
-                (
-                    HIT_CLOSE_TO_TRAY,
-                    close_to_tray,
-                    32.0,
-                    if tr { "Alta Al (Tepsi)" } else { "Minimize to Tray" },
-                ),
-                (
-                    HIT_CLOSE_EXIT,
-                    !close_to_tray,
-                    182.0,
-                    if tr { "Uygulamayı Kapat" } else { "Exit Application" },
-                ),
-            ];
-            draw_settings_selector(
+            // Section 2: Close Button Behavior
+            draw_glass_text(
                 &mut canvas,
                 text_dc,
                 text_buf,
+                ui.section_close,
+                18 + vx_i,
+                98,
+                260,
+                17,
                 dpi,
-                vx_i,
-                hover,
                 font_section,
-                font_fluent_gear,
-                font_sub,
-                font_body,
-                font_body_bold,
-                &SettingsSelectorSpec {
-                    section_title: if tr { "Kapatma Tuşu (\u{2715})" } else { "Close Button (\u{2715})" },
-                    section_y: 116,
-                    card_y: 134.0,
-                    glyph: "\u{E8BB}",
-                    status_text: close_desc,
-                    anim_idx: STATE.anim_close_opt,
-                    step_x: 150.0,
-                    pill_w: 146.0,
-                    accent_w: 40.0,
-                    opts: &close_opts,
-                },
+                pal.text_muted,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
 
-            let sys_tr = system_is_turkish();
-            let lang_desc = match lang_pref {
-                LangPref::System => {
-                    if sys_tr {
-                        "Sistem dili algılandı (Türkçe)"
+            canvas.draw_round_card(16.0 + vx, 116.0, 328.0, 56.0, 8.0, pal.card_fill, 1.0, pal.card_border, 1.0);
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "\u{E8BB}",
+                28 + vx_i,
+                120,
+                24,
+                15,
+                dpi,
+                font_fluent_gear,
+                pal.icon_fg,
+                1.0,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
+            let close_desc = if close_to_tray { ui.close_desc_tray } else { ui.close_desc_exit };
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                close_desc,
+                56 + vx_i,
+                120,
+                276,
+                15,
+                dpi,
+                font_sub,
+                pal.accent_text,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+
+            canvas.draw_round_card(28.0 + vx, 138.0, 304.0, 29.0, 6.0, pal.track_fill, 1.0, pal.track_border, 1.0);
+            let close_opts: [(usize, bool, f32, &str); 2] = [
+                (HIT_CLOSE_TO_TRAY, close_to_tray, 32.0, ui.close_opt_tray),
+                (HIT_CLOSE_EXIT, !close_to_tray, 182.0, ui.close_opt_exit),
+            ];
+            for &(hid, selected, ox, _) in &close_opts {
+                if hover == hid && !selected {
+                    canvas.draw_round_card(ox + vx, 140.0, 146.0, 25.0, 5.0, pal.pill_hover, 1.0, pal.pill_hover, 0.0);
+                }
+            }
+            let opt_x = 32.0 + STATE.anim_close_opt * 150.0 + vx;
+            canvas.draw_round_card(opt_x, 140.0, 146.0, 25.0, 5.0, pal.pill_fill, 1.0, pal.pill_border, 1.0);
+            canvas.draw_round_card(opt_x + 53.0, 162.5, 40.0, 2.0, 1.0, pal.accent, 1.0, pal.accent, 0.0);
+            for &(_, selected, ox, label) in &close_opts {
+                draw_glass_text(
+                    &mut canvas,
+                    text_dc,
+                    text_buf,
+                    label,
+                    ox as i32 + vx_i,
+                    139,
+                    146,
+                    23,
+                    dpi,
+                    if selected { font_body_bold } else { font_body },
+                    if selected { pal.text_selected } else { pal.text_secondary },
+                    1.0,
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                );
+            }
+
+            // Section 3: App Theme (System / Light / Dark)
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                ui.section_theme,
+                18 + vx_i,
+                174,
+                260,
+                17,
+                dpi,
+                font_section,
+                pal.text_muted,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+
+            canvas.draw_round_card(16.0 + vx, 192.0, 328.0, 56.0, 8.0, pal.card_fill, 1.0, pal.card_border, 1.0);
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "\u{E790}",
+                28 + vx_i,
+                196,
+                24,
+                15,
+                dpi,
+                font_fluent_gear,
+                pal.icon_fg,
+                1.0,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
+            let theme_desc = match theme_pref {
+                ThemePref::System => {
+                    if pal.is_light {
+                        ui.theme_desc_system_light
                     } else {
-                        "System language detected (English)"
+                        ui.theme_desc_system_dark
                     }
                 }
-                LangPref::Turkish => "Türkçe arayüz seçili",
-                LangPref::English => "English interface selected",
+                ThemePref::Light => ui.theme_desc_light,
+                ThemePref::Dark => ui.theme_desc_dark,
             };
-            let lang_opts: [(usize, bool, f32, &str); 3] = [
-                (
-                    HIT_LANG_SYSTEM,
-                    lang_pref == LangPref::System,
-                    32.0,
-                    if tr { "Sistem" } else { "System" },
-                ),
-                (HIT_LANG_TR, lang_pref == LangPref::Turkish, 132.0, "Türkçe"),
-                (HIT_LANG_EN, lang_pref == LangPref::English, 232.0, "English"),
-            ];
-            draw_settings_selector(
+            draw_glass_text(
                 &mut canvas,
                 text_dc,
                 text_buf,
+                theme_desc,
+                56 + vx_i,
+                196,
+                276,
+                15,
                 dpi,
-                vx_i,
-                hover,
-                font_section,
-                font_fluent_gear,
                 font_sub,
-                font_body,
-                font_body_bold,
-                &SettingsSelectorSpec {
-                    section_title: if tr { "Uygulama Dili" } else { "App Language" },
-                    section_y: 214,
-                    card_y: 232.0,
-                    glyph: "\u{E774}",
-                    status_text: lang_desc,
-                    anim_idx: STATE.anim_lang_idx,
-                    step_x: 100.0,
-                    pill_w: 96.0,
-                    accent_w: 36.0,
-                    opts: &lang_opts,
-                },
+                pal.accent_text,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
-        } else {
-            // === MAIN CONTROL VIEW ===
-            // 3. Hero SettingsCard (16, 44, 328, 72, r = 8)
-            let hero_fill = if hover == HIT_HERO { [50, 50, 50] } else { [43, 43, 43] };
-            let hero_border = if active { [56, 120, 168] } else { [58, 58, 58] };
-            canvas.draw_round_card(16.0 + vx, 44.0, 328.0, 72.0, 8.0, hero_fill, 1.0, hero_border, 1.0);
-            canvas.draw_rgba_icon(mug_rgba, 28.0 + vx, 56.0, 48.0, 48.0);
-            canvas.draw_winui_toggle(286.0 + vx, 70.0, 40.0, 20.0, STATE.anim_hero_toggle);
 
-            // 4. WinUI 3 SelectorBar / Segmented Control (16, 150, 328, 44, r = 8)
-            canvas.draw_round_card(16.0 + vx, 150.0, 328.0, 44.0, 8.0, [43, 43, 43], 1.0, [58, 58, 58], 1.0);
+            canvas.draw_round_card(28.0 + vx, 214.0, 304.0, 29.0, 6.0, pal.track_fill, 1.0, pal.track_border, 1.0);
+            let theme_opts: [(usize, ThemePref, f32, &str); 3] = [
+                (HIT_THEME_SYSTEM, ThemePref::System, 32.0, ui.lang_opt_system),
+                (HIT_THEME_LIGHT, ThemePref::Light, 132.0, ui.theme_opt_light),
+                (HIT_THEME_DARK, ThemePref::Dark, 232.0, ui.theme_opt_dark),
+            ];
+            for &(hid, tpref, tx, _) in &theme_opts {
+                if hover == hid && theme_pref != tpref {
+                    canvas.draw_round_card(tx + vx, 216.0, 96.0, 25.0, 5.0, pal.pill_hover, 1.0, pal.pill_hover, 0.0);
+                }
+            }
+            let theme_x = 32.0 + STATE.anim_theme_opt * 100.0 + vx;
+            canvas.draw_round_card(theme_x, 216.0, 96.0, 25.0, 5.0, pal.pill_fill, 1.0, pal.pill_border, 1.0);
+            canvas.draw_round_card(theme_x + 30.0, 238.5, 36.0, 2.0, 1.0, pal.accent, 1.0, pal.accent, 0.0);
+            for &(_, tpref, tx, label) in &theme_opts {
+                let selected = theme_pref == tpref;
+                draw_glass_text(
+                    &mut canvas,
+                    text_dc,
+                    text_buf,
+                    label,
+                    tx as i32 + vx_i,
+                    215,
+                    96,
+                    23,
+                    dpi,
+                    if selected { font_body_bold } else { font_body },
+                    if selected { pal.text_selected } else { pal.text_secondary },
+                    1.0,
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                );
+            }
+
+            // Section 4: App Language (3x4 Grid: System + 11 popular languages)
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                ui.section_lang,
+                18 + vx_i,
+                250,
+                260,
+                17,
+                dpi,
+                font_section,
+                pal.text_muted,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+
+            canvas.draw_round_card(16.0 + vx, 268.0, 328.0, 108.0, 8.0, pal.card_fill, 1.0, pal.card_border, 1.0);
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                "\u{E774}",
+                28 + vx_i,
+                272,
+                24,
+                15,
+                dpi,
+                font_fluent_gear,
+                pal.icon_fg,
+                1.0,
+                DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+            );
+            let lang_desc = if lang_pref == LangPref::System {
+                let sys_lang = system_detected_lang();
+                format!("{} ({})", ui.lang_desc_system_prefix, LANG_NATIVE_NAMES[sys_lang as usize])
+            } else {
+                ui.lang_desc_selected.to_string()
+            };
+            draw_glass_text(
+                &mut canvas,
+                text_dc,
+                text_buf,
+                &lang_desc,
+                56 + vx_i,
+                272,
+                276,
+                15,
+                dpi,
+                font_sub,
+                pal.accent_text,
+                1.0,
+                DT_LEFT | DT_VCENTER | DT_SINGLELINE,
+            );
+
+            canvas.draw_round_card(26.0 + vx, 290.0, 308.0, 81.0, 6.0, pal.track_fill, 1.0, pal.track_border, 1.0);
+            let sel_idx = lang_pref as usize;
+            for idx in 0..12usize {
+                if hover == HIT_LANG_BASE + idx && sel_idx != idx {
+                    let col = (idx % 4) as f32;
+                    let row = (idx / 4) as f32;
+                    canvas.draw_round_card(
+                        30.0 + col * 76.0 + vx,
+                        293.0 + row * 26.0,
+                        72.0,
+                        23.0,
+                        5.0,
+                        pal.pill_hover,
+                        1.0,
+                        pal.pill_hover,
+                        0.0,
+                    );
+                }
+            }
+            let active_x = 30.0 + STATE.anim_lang_col * 76.0 + vx;
+            let active_y = 293.0 + STATE.anim_lang_row * 26.0;
+            canvas.draw_round_card(active_x, active_y, 72.0, 23.0, 5.0, pal.pill_fill, 1.0, pal.pill_border, 1.0);
+            canvas.draw_round_card(active_x + 20.0, active_y + 20.5, 32.0, 2.0, 1.0, pal.accent, 1.0, pal.accent, 0.0);
+
+            for idx in 0..12usize {
+                let col = (idx % 4) as i32;
+                let row = (idx / 4) as i32;
+                let selected = sel_idx == idx;
+                let label = if idx == 0 {
+                    ui.lang_opt_system
+                } else {
+                    LANG_NATIVE_NAMES[idx - 1]
+                };
+                draw_glass_text(
+                    &mut canvas,
+                    text_dc,
+                    text_buf,
+                    label,
+                    30 + col * 76 + vx_i,
+                    292 + row * 26,
+                    72,
+                    21,
+                    dpi,
+                    font_sub,
+                    if selected { pal.text_selected } else { pal.text_secondary },
+                    1.0,
+                    DT_CENTER | DT_VCENTER | DT_SINGLELINE,
+                );
+            }
+        } else {
+            // === MAIN CONTROL VIEW (360 x 388) ===
+            // 3. Hero SettingsCard (16, 52, 328, 86, r = 8)
+            let hero_fill = if hover == HIT_HERO { pal.card_hover } else { pal.card_fill };
+            let hero_border = if active { pal.card_border_active } else { pal.card_border };
+            canvas.draw_round_card(16.0 + vx, 52.0, 328.0, 86.0, 8.0, hero_fill, 1.0, hero_border, 1.0);
+            canvas.draw_rgba_icon(mug_rgba, 28.0 + vx, 69.0, 52.0, 52.0);
+            canvas.draw_winui_toggle(286.0 + vx, 85.0, 40.0, 20.0, STATE.anim_hero_toggle, pal.is_light);
+
+            // 4. WinUI 3 SelectorBar / Segmented Control (16, 176, 328, 48, r = 8)
+            canvas.draw_round_card(16.0 + vx, 176.0, 328.0, 48.0, 8.0, pal.card_fill, 1.0, pal.card_border, 1.0);
             let segs: [(usize, Mode, f32, &str); 4] = [
-                (HIT_MODE_FOREVER, Mode::Forever, 20.0, if tr { "Süresiz" } else { "Always" }),
-                (HIT_MODE_30M, Mode::Timer30M, 100.0, if tr { "30 Dakika" } else { "30 Min" }),
-                (HIT_MODE_1H, Mode::Timer1H, 180.0, if tr { "1 Saat" } else { "1 Hour" }),
-                (HIT_MODE_3H, Mode::Timer3H, 260.0, if tr { "3 Saat" } else { "3 Hours" }),
+                (HIT_MODE_FOREVER, Mode::Forever, 20.0, ui.mode_forever),
+                (HIT_MODE_30M, Mode::Timer30M, 100.0, ui.mode_30m),
+                (HIT_MODE_1H, Mode::Timer1H, 180.0, ui.mode_1h),
+                (HIT_MODE_3H, Mode::Timer3H, 260.0, ui.mode_3h),
             ];
             for &(hid, mode, sx, _) in &segs {
                 if hover == hid && STATE.mode != mode {
-                    canvas.draw_round_card(sx + vx, 154.0, 78.0, 36.0, 6.0, [50, 50, 50], 1.0, [50, 50, 50], 0.0);
+                    canvas.draw_round_card(sx + vx, 180.0, 78.0, 40.0, 6.0, pal.pill_hover, 1.0, pal.pill_hover, 0.0);
                 }
             }
             if STATE.anim_mode_alpha > 0.01 {
                 let pill_x = 20.0 + STATE.anim_mode_idx * 80.0 + vx;
                 canvas.draw_round_card(
                     pill_x,
-                    154.0,
+                    180.0,
                     78.0,
-                    36.0,
+                    40.0,
                     6.0,
-                    [56, 56, 56],
+                    pal.pill_fill,
                     STATE.anim_mode_alpha,
-                    [70, 70, 70],
+                    pal.pill_border,
                     STATE.anim_mode_alpha,
                 );
                 canvas.draw_round_card(
                     pill_x + 27.0,
-                    185.0,
+                    215.0,
                     24.0,
                     3.0,
                     1.5,
-                    [76, 194, 255],
+                    pal.accent,
                     STATE.anim_mode_alpha,
-                    [76, 194, 255],
+                    pal.accent,
                     0.0,
                 );
             }
 
-            // 5. Display SettingsCard (16, 228, 328, 58, r = 8)
-            let disp_fill = if hover == HIT_TOGGLE_DISPLAY { [50, 50, 50] } else { [43, 43, 43] };
-            canvas.draw_round_card(16.0 + vx, 228.0, 328.0, 58.0, 8.0, disp_fill, 1.0, [58, 58, 58], 1.0);
-            canvas.draw_winui_toggle(286.0 + vx, 247.0, 40.0, 20.0, STATE.anim_disp_toggle);
+            // 5. Display SettingsCard (16, 264, 328, 72, r = 8)
+            let disp_fill = if hover == HIT_TOGGLE_DISPLAY { pal.card_hover } else { pal.card_fill };
+            canvas.draw_round_card(16.0 + vx, 264.0, 328.0, 72.0, 8.0, disp_fill, 1.0, pal.card_border, 1.0);
+            canvas.draw_winui_toggle(286.0 + vx, 290.0, 40.0, 20.0, STATE.anim_disp_toggle, pal.is_light);
 
             // Hero Card Title & Status
             draw_glass_text(
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Uyku Engelleme" } else { "Sleep Prevention" },
+                ui.hero_title,
                 88 + vx_i,
-                58,
+                70,
                 188,
                 22,
                 dpi,
                 font_title_disp,
-                [255, 255, 255],
+                pal.text_selected,
                 1.0,
                 DT_LEFT | DT_SINGLELINE,
             );
@@ -1906,21 +2829,11 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 let h = rem / 3600;
                 let m = (rem % 3600) / 60;
                 let sec = rem % 60;
-                if tr {
-                    format!("Kalan süre: {h:02}:{m:02}:{sec:02}")
-                } else {
-                    format!("Remaining: {h:02}:{m:02}:{sec:02}")
-                }
+                format!("{}: {h:02}:{m:02}:{sec:02}", ui.hero_remaining_prefix)
             } else if active {
-                if tr {
-                    "Aktif • Süresiz açık".to_string()
-                } else {
-                    "Active • Always on".to_string()
-                }
-            } else if tr {
-                "Kapalı • Normal uyku modu".to_string()
+                ui.hero_active_forever.to_string()
             } else {
-                "Off • Normal sleep mode".to_string()
+                ui.hero_off.to_string()
             };
             draw_glass_text(
                 &mut canvas,
@@ -1928,12 +2841,12 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 text_buf,
                 &hero_sub,
                 88 + vx_i,
-                82,
+                94,
                 188,
                 18,
                 dpi,
                 font_sub,
-                if active { [96, 205, 255] } else { [158, 158, 158] },
+                if active { pal.accent_text } else { pal.text_muted },
                 1.0,
                 DT_LEFT | DT_SINGLELINE,
             );
@@ -1943,14 +2856,14 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Çalışma Modu" } else { "Duration Mode" },
+                ui.section_mode,
                 18 + vx_i,
-                128,
+                154,
                 200,
                 18,
                 dpi,
                 font_section,
-                [158, 158, 158],
+                pal.text_muted,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -1964,12 +2877,12 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                     text_buf,
                     label,
                     sx as i32 + vx_i,
-                    153,
+                    179,
                     78,
-                    32,
+                    36,
                     dpi,
                     if selected { font_body_bold } else { font_body },
-                    if selected { [255, 255, 255] } else { [204, 204, 204] },
+                    if selected { pal.text_selected } else { pal.text_secondary },
                     1.0,
                     DT_CENTER | DT_VCENTER | DT_SINGLELINE,
                 );
@@ -1980,14 +2893,14 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Ekran ve Güç" } else { "Display & Power" },
+                ui.section_display,
                 18 + vx_i,
-                206,
+                242,
                 200,
                 18,
                 dpi,
                 font_section,
-                [158, 158, 158],
+                pal.text_muted,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -1999,12 +2912,12 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 text_buf,
                 "\u{E7F4}",
                 28 + vx_i,
-                228,
+                264,
                 24,
-                58,
+                72,
                 dpi,
                 font_fluent,
-                [224, 224, 224],
+                pal.icon_fg,
                 1.0,
                 DT_CENTER | DT_VCENTER | DT_SINGLELINE,
             );
@@ -2012,14 +2925,14 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Ekranı da açık tut" } else { "Keep display awake" },
+                ui.display_title,
                 60 + vx_i,
-                236,
+                279,
                 216,
                 20,
                 dpi,
                 font_body,
-                [243, 243, 243],
+                pal.text_primary,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -2027,14 +2940,14 @@ unsafe fn paint_control_panel(hwnd: HWND) {
                 &mut canvas,
                 text_dc,
                 text_buf,
-                if tr { "Monitörün kapanmasını engeller" } else { "Prevents monitor from turning off" },
+                ui.display_sub,
                 60 + vx_i,
-                256,
+                301,
                 216,
                 16,
                 dpi,
                 font_sub,
-                [158, 158, 158],
+                pal.text_muted,
                 1.0,
                 DT_LEFT | DT_VCENTER | DT_SINGLELINE,
             );
@@ -2088,7 +3001,7 @@ fn main() -> Result<()> {
 
         let _ = RegisterClassW(&wc);
 
-        let title = app_window_title(STATE.lang_tr);
+        let title = ui_strings(STATE.lang).window_title;
 
         let hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
@@ -2166,14 +3079,7 @@ unsafe fn show_timeout_notification(hwnd: HWND) {
     nid.uID = ID_TRAY_ICON;
     nid.uFlags = NIF_INFO;
     set_string(&mut nid.szInfoTitle, "AlwaysOn");
-    set_string(
-        &mut nid.szInfo,
-        if STATE.lang_tr {
-            "Süre doldu, uyku engelleme kapatıldı."
-        } else {
-            "Timer ended, sleep prevention deactivated."
-        },
-    );
+    set_string(&mut nid.szInfo, ui_strings(STATE.lang).notify_timeout);
     nid.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON;
     let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
@@ -2319,9 +3225,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                     start_ui_anim(hwnd);
                     let _ = InvalidateRect(hwnd, None, false);
                 }
-                HIT_LANG_SYSTEM => set_language_pref(hwnd, LangPref::System),
-                HIT_LANG_TR => set_language_pref(hwnd, LangPref::Turkish),
-                HIT_LANG_EN => set_language_pref(hwnd, LangPref::English),
+                HIT_THEME_SYSTEM => set_theme_pref(hwnd, ThemePref::System),
+                HIT_THEME_LIGHT => set_theme_pref(hwnd, ThemePref::Light),
+                HIT_THEME_DARK => set_theme_pref(hwnd, ThemePref::Dark),
+                hit if (HIT_LANG_BASE..HIT_LANG_BASE + 12).contains(&hit) => {
+                    set_language_pref(hwnd, lang_pref_from_dword((hit - HIT_LANG_BASE) as u32));
+                }
                 HIT_BTN_HIDE => hide_control_panel(hwnd, false),
                 HIT_BTN_EXIT => {
                     if STATE.close_to_tray {
@@ -2382,6 +3291,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
                 }
             }
             LRESULT(0)
+        }
+        WM_SETTINGCHANGE => {
+            if STATE.theme_pref == ThemePref::System {
+                let sys_light = system_uses_light_theme();
+                if sys_light != STATE.is_light_theme {
+                    STATE.is_light_theme = sys_light;
+                    apply_dwm_winui(hwnd);
+                    let _ = InvalidateRect(hwnd, None, false);
+                }
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_CLOSE => {
             if STATE.close_to_tray {
@@ -2453,29 +3373,16 @@ unsafe fn update_tray_and_power(hwnd: HWND, notify: bool) {
         let _ = KillTimer(hwnd, HEARTBEAT_TIMER_ID);
     }
 
+    let s = ui_strings(STATE.lang);
     if is_active {
         nid.hIcon = STATE.hicon_awake;
         if notify {
-            set_string(
-                &mut nid.szInfo,
-                if STATE.lang_tr {
-                    "Uyku engelleme aktif."
-                } else {
-                    "AlwaysOn activated."
-                },
-            );
+            set_string(&mut nid.szInfo, s.notify_activated);
         }
     } else {
         nid.hIcon = STATE.hicon_sleep;
         if notify {
-            set_string(
-                &mut nid.szInfo,
-                if STATE.lang_tr {
-                    "Uyku engelleme devre dışı."
-                } else {
-                    "AlwaysOn deactivated."
-                },
-            );
+            set_string(&mut nid.szInfo, s.notify_deactivated);
         }
     }
     set_string(&mut nid.szTip, &tray_tooltip_text());
@@ -2507,46 +3414,15 @@ unsafe fn show_context_menu(hwnd: HWND) {
     let _ = GetCursorPos(&mut pt);
 
     if let Ok(hmenu) = CreatePopupMenu() {
-        let txt_open = if STATE.lang_tr {
-            w!("Kontrol Panelini Aç")
-        } else {
-            w!("Open Control Panel")
-        };
-        let txt_off = if STATE.lang_tr {
-            w!("Kapalı (Normal Uyku)")
-        } else {
-            w!("Off (Normal Sleep)")
-        };
-        let txt_forever = if STATE.lang_tr {
-            w!("Sürekli Açık Tut")
-        } else {
-            w!("Always On")
-        };
-        let txt_30m = if STATE.lang_tr {
-            w!("30 Dakika Açık Tut")
-        } else {
-            w!("Keep On for 30 Minutes")
-        };
-        let txt_1h = if STATE.lang_tr {
-            w!("1 Saat Açık Tut")
-        } else {
-            w!("Keep On for 1 Hour")
-        };
-        let txt_3h = if STATE.lang_tr {
-            w!("3 Saat Açık Tut")
-        } else {
-            w!("Keep On for 3 Hours")
-        };
-        let txt_auto = if STATE.lang_tr {
-            w!("Başlangıçta Otomatik Çalıştır")
-        } else {
-            w!("Run at Startup")
-        };
-        let txt_exit = if STATE.lang_tr {
-            w!("Çıkış")
-        } else {
-            w!("Exit")
-        };
+        let s = ui_strings(STATE.lang);
+        let txt_open = s.menu_open;
+        let txt_off = s.menu_off;
+        let txt_forever = s.menu_forever;
+        let txt_30m = s.menu_30m;
+        let txt_1h = s.menu_1h;
+        let txt_3h = s.menu_3h;
+        let txt_auto = s.menu_auto;
+        let txt_exit = s.menu_exit;
 
         let _ = InsertMenuW(hmenu, 0xFFFFFFFF, MF_BYPOSITION | MF_STRING, IDM_OPEN_UI, txt_open);
         let _ = InsertMenuW(
@@ -2641,9 +3517,11 @@ mod tests {
         orig_close: u32,
         orig_disp: u32,
         orig_lang: u32,
+        orig_theme: u32,
         had_close: bool,
         had_disp: bool,
         had_lang: bool,
+        had_theme: bool,
     }
 
     unsafe fn reg_has_value(name: PCWSTR) -> Option<u32> {
@@ -2677,13 +3555,16 @@ mod tests {
             let c = reg_has_value(REG_CLOSE_TO_TRAY);
             let d = reg_has_value(REG_KEEP_DISPLAY_ON);
             let l = reg_has_value(REG_LANGUAGE);
+            let t = reg_has_value(REG_THEME);
             Self {
                 orig_close: c.unwrap_or(1),
                 orig_disp: d.unwrap_or(1),
                 orig_lang: l.unwrap_or(0),
+                orig_theme: t.unwrap_or(0),
                 had_close: c.is_some(),
                 had_disp: d.is_some(),
                 had_lang: l.is_some(),
+                had_theme: t.is_some(),
             }
         }
     }
@@ -2706,6 +3587,11 @@ mod tests {
                 } else {
                     delete_reg_value(REG_LANGUAGE);
                 }
+                if self.had_theme {
+                    write_reg_dword(REG_THEME, self.orig_theme);
+                } else {
+                    delete_reg_value(REG_THEME);
+                }
                 load_app_settings();
             }
         }
@@ -2718,31 +3604,39 @@ mod tests {
             let orig_settings = STATE.in_settings;
             STATE.in_settings = false;
 
-            // Main view caption + controls
+            // Main view caption + controls (360 x 388)
             assert_eq!(hit_test_ui(254, 15), HIT_BTN_SETTINGS);
             assert_eq!(hit_test_ui(294, 15), HIT_BTN_HIDE);
             assert_eq!(hit_test_ui(334, 15), HIT_BTN_EXIT);
-            assert_eq!(hit_test_ui(120, 80), HIT_HERO);
-            assert_eq!(hit_test_ui(55, 170), HIT_MODE_FOREVER);
-            assert_eq!(hit_test_ui(135, 170), HIT_MODE_30M);
-            assert_eq!(hit_test_ui(215, 170), HIT_MODE_1H);
-            assert_eq!(hit_test_ui(295, 170), HIT_MODE_3H);
-            assert_eq!(hit_test_ui(120, 250), HIT_TOGGLE_DISPLAY);
-            assert_eq!(hit_test_ui(120, 130), HIT_NONE);
+            assert_eq!(hit_test_ui(120, 95), HIT_HERO);
+            assert_eq!(hit_test_ui(55, 198), HIT_MODE_FOREVER);
+            assert_eq!(hit_test_ui(135, 198), HIT_MODE_30M);
+            assert_eq!(hit_test_ui(215, 198), HIT_MODE_1H);
+            assert_eq!(hit_test_ui(295, 198), HIT_MODE_3H);
+            assert_eq!(hit_test_ui(120, 295), HIT_TOGGLE_DISPLAY);
+            assert_eq!(hit_test_ui(120, 162), HIT_NONE);
 
-            // Settings view caption + startup toggle + close behavior + language selector
+            // Settings view caption + startup toggle + close behavior + theme selector + 3x4 language grid
             STATE.in_settings = true;
             assert_eq!(hit_test_ui(24, 18), HIT_BTN_BACK);
             assert_eq!(hit_test_ui(254, 15), HIT_BTN_SETTINGS);
-            assert_eq!(hit_test_ui(120, 84), HIT_TOGGLE_AUTOSTART);
-            assert_eq!(hit_test_ui(100, 180), HIT_CLOSE_TO_TRAY);
-            assert_eq!(hit_test_ui(250, 180), HIT_CLOSE_EXIT);
-            assert_eq!(hit_test_ui(80, 280), HIT_LANG_SYSTEM);
-            assert_eq!(hit_test_ui(180, 280), HIT_LANG_TR);
-            assert_eq!(hit_test_ui(280, 280), HIT_LANG_EN);
+            assert_eq!(hit_test_ui(120, 74), HIT_TOGGLE_AUTOSTART);
+            assert_eq!(hit_test_ui(100, 152), HIT_CLOSE_TO_TRAY);
+            assert_eq!(hit_test_ui(250, 152), HIT_CLOSE_EXIT);
+            assert_eq!(hit_test_ui(80, 228), HIT_THEME_SYSTEM);
+            assert_eq!(hit_test_ui(180, 228), HIT_THEME_LIGHT);
+            assert_eq!(hit_test_ui(280, 228), HIT_THEME_DARK);
+            for idx in 0..12usize {
+                let col = (idx % 4) as i32;
+                let row = (idx / 4) as i32;
+                let cx = 30 + col * 76 + 36;
+                let cy = 293 + row * 26 + 11;
+                assert_eq!(hit_test_ui(cx, cy), HIT_LANG_BASE + idx);
+            }
             // Gaps & card headers outside buttons must return HIT_NONE
-            assert_eq!(hit_test_ui(180, 124), HIT_NONE);
-            assert_eq!(hit_test_ui(180, 245), HIT_NONE);
+            assert_eq!(hit_test_ui(180, 108), HIT_NONE);
+            assert_eq!(hit_test_ui(180, 204), HIT_NONE);
+            assert_eq!(hit_test_ui(180, 278), HIT_NONE);
 
             STATE.in_settings = orig_settings;
         }
@@ -2777,40 +3671,93 @@ mod tests {
             h,
             s: 1.0,
         };
-        canvas.fill_winui_base();
-        let base_corner = canvas.buf[0];
-        assert_eq!((base_corner >> 24) & 0xFF, 240);
 
-        // Draw opaque card covering (16, 44, 328, 72) and verify fast interior fill exactness
+        // Dark mode surface & card verification
+        canvas.fill_winui_base(false);
+        assert_eq!((canvas.buf[0] >> 24) & 0xFF, 240);
         canvas.draw_round_card(16.0, 44.0, 328.0, 72.0, 8.0, [43, 43, 43], 1.0, [58, 58, 58], 1.0);
-        let inside_idx = (80 * w + 180) as usize;
-        assert_eq!(canvas.buf[inside_idx], 0xFF_2B_2B_2B);
+        assert_eq!(canvas.buf[(80 * w + 180) as usize], 0xFF_2B_2B_2B);
 
-        // Draw embedded awake/sleep mug icons + animated toggle states
+        // Light mode surface & card verification
+        canvas.fill_winui_base(true);
+        assert_eq!((canvas.buf[0] >> 24) & 0xFF, 245);
+        let light_pal = theme_palette(true);
+        canvas.draw_round_card(16.0, 44.0, 328.0, 72.0, 8.0, light_pal.card_fill, 1.0, light_pal.card_border, 1.0);
+        assert_eq!(canvas.buf[(80 * w + 180) as usize], 0xFF_FC_FC_FC);
+
+        // Draw embedded awake/sleep mug icons + animated toggle states in both Dark and Light palettes
         canvas.draw_rgba_icon(MUG_AWAKE_RGBA, 28.0, 56.0, 48.0, 48.0);
         canvas.draw_rgba_icon(MUG_SLEEP_RGBA, 28.0, 120.0, 32.0, 32.0);
-        canvas.draw_winui_toggle(286.0, 70.0, 40.0, 20.0, 0.0);
-        canvas.draw_winui_toggle(286.0, 140.0, 40.0, 20.0, 0.5);
-        canvas.draw_winui_toggle(286.0, 210.0, 40.0, 20.0, 1.0);
+        canvas.draw_winui_toggle(286.0, 70.0, 40.0, 20.0, 0.0, false);
+        canvas.draw_winui_toggle(286.0, 140.0, 40.0, 20.0, 0.5, true);
+        canvas.draw_winui_toggle(286.0, 210.0, 40.0, 20.0, 1.0, false);
+        canvas.draw_winui_toggle(286.0, 260.0, 40.0, 20.0, 1.0, true);
 
         let mug_center = canvas.buf[(80 * w + 52) as usize];
-        assert_ne!(mug_center, 0xFF_2B_2B_2B);
-        let toggle_on_track = canvas.buf[(220 * w + 292) as usize];
-        let toggle_off_track = canvas.buf[(80 * w + 316) as usize];
-        assert_ne!(toggle_on_track, toggle_off_track);
+        assert_ne!(mug_center, 0xFF_FC_FC_FC);
+        let toggle_dark_on = canvas.buf[(220 * w + 292) as usize];
+        let toggle_dark_off = canvas.buf[(80 * w + 316) as usize];
+        let toggle_light_on = canvas.buf[(270 * w + 292) as usize];
+        assert_ne!(toggle_dark_on, toggle_dark_off);
+        assert_ne!(toggle_light_on, toggle_dark_on);
     }
 
     #[test]
     fn test_scenario_registry_settings_roundtrip() {
-        assert_eq!(lang_pref_from_dword(0), LangPref::System);
-        assert_eq!(lang_pref_from_dword(1), LangPref::Turkish);
-        assert_eq!(lang_pref_from_dword(2), LangPref::English);
+        let expected_prefs = [
+            LangPref::System,
+            LangPref::Tr,
+            LangPref::En,
+            LangPref::De,
+            LangPref::Fr,
+            LangPref::Es,
+            LangPref::It,
+            LangPref::Pt,
+            LangPref::Ru,
+            LangPref::Zh,
+            LangPref::Ja,
+            LangPref::Ko,
+        ];
+        for (i, &pref) in expected_prefs.iter().enumerate() {
+            assert_eq!(lang_pref_from_dword(i as u32), pref);
+        }
         assert_eq!(lang_pref_from_dword(99), LangPref::System);
 
-        assert!(resolve_lang_tr(LangPref::System, true));
-        assert!(!resolve_lang_tr(LangPref::System, false));
-        assert!(resolve_lang_tr(LangPref::Turkish, false));
-        assert!(!resolve_lang_tr(LangPref::English, true));
+        let primary_map = [
+            (0x1F, Lang::Tr),
+            (0x09, Lang::En),
+            (0x07, Lang::De),
+            (0x0C, Lang::Fr),
+            (0x0A, Lang::Es),
+            (0x10, Lang::It),
+            (0x16, Lang::Pt),
+            (0x19, Lang::Ru),
+            (0x04, Lang::Zh),
+            (0x11, Lang::Ja),
+            (0x12, Lang::Ko),
+            (0x00, Lang::En),
+        ];
+        for (pid, expected_lang) in primary_map {
+            assert_eq!(lang_from_primary_lang_id(pid), expected_lang);
+        }
+
+        assert_eq!(lang_grid_pos(LangPref::System), (0.0, 0.0));
+        assert_eq!(lang_grid_pos(LangPref::De), (3.0, 0.0));
+        assert_eq!(lang_grid_pos(LangPref::Ru), (0.0, 2.0));
+        assert_eq!(lang_grid_pos(LangPref::Ko), (3.0, 2.0));
+
+        assert_eq!(resolve_lang(LangPref::System, Lang::Ja), Lang::Ja);
+        assert_eq!(resolve_lang(LangPref::De, Lang::Tr), Lang::De);
+        assert_eq!(resolve_lang(LangPref::Ko, Lang::En), Lang::Ko);
+
+        assert_eq!(theme_pref_from_dword(0), ThemePref::System);
+        assert_eq!(theme_pref_from_dword(1), ThemePref::Light);
+        assert_eq!(theme_pref_from_dword(2), ThemePref::Dark);
+        assert_eq!(theme_pref_from_dword(99), ThemePref::System);
+        assert!(resolve_is_light_theme(ThemePref::Light, false));
+        assert!(!resolve_is_light_theme(ThemePref::Dark, true));
+        assert!(resolve_is_light_theme(ThemePref::System, true));
+        assert!(!resolve_is_light_theme(ThemePref::System, false));
 
         let _lock = STATE_TEST_LOCK.lock().unwrap();
         unsafe {
@@ -2818,37 +3765,69 @@ mod tests {
 
             write_reg_dword(REG_CLOSE_TO_TRAY, 0);
             write_reg_dword(REG_KEEP_DISPLAY_ON, 0);
-            write_reg_dword(REG_LANGUAGE, 2);
+            write_reg_dword(REG_LANGUAGE, 3); // De
+            write_reg_dword(REG_THEME, 1); // Light
             load_app_settings();
-            let lp_en = STATE.lang_pref;
+            let lp_de = STATE.lang_pref;
+            let l_de = STATE.lang;
+            let tp_l = STATE.theme_pref;
+            let is_l = STATE.is_light_theme;
             assert!(!STATE.close_to_tray);
             assert!(!STATE.keep_display_on);
-            assert_eq!(lp_en, LangPref::English);
-            assert!(!STATE.lang_tr);
+            assert_eq!(lp_de, LangPref::De);
+            assert_eq!(l_de, Lang::De);
+            assert_eq!(tp_l, ThemePref::Light);
+            assert!(is_l);
             assert!((STATE.anim_close_opt - 1.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_theme_opt - 1.0).abs() < f32::EPSILON);
             assert!((STATE.anim_disp_toggle - 0.0).abs() < f32::EPSILON);
-            assert!((STATE.anim_lang_idx - 2.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_lang_col - 3.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_lang_row - 0.0).abs() < f32::EPSILON);
 
-            write_reg_dword(REG_LANGUAGE, 1);
+            write_reg_dword(REG_THEME, 2); // Dark
             load_app_settings();
-            let lp_tr = STATE.lang_pref;
-            assert_eq!(lp_tr, LangPref::Turkish);
-            assert!(STATE.lang_tr);
-            assert!((STATE.anim_lang_idx - 1.0).abs() < f32::EPSILON);
+            let tp_d = STATE.theme_pref;
+            let is_d = STATE.is_light_theme;
+            assert_eq!(tp_d, ThemePref::Dark);
+            assert!(!is_d);
+            assert!((STATE.anim_theme_opt - 2.0).abs() < f32::EPSILON);
+
+            for (dword, pref, lang, exp_col, exp_row) in [
+                (10, LangPref::Ja, Lang::Ja, 2.0f32, 2.0f32),
+                (8, LangPref::Ru, Lang::Ru, 0.0f32, 2.0f32),
+                (2, LangPref::En, Lang::En, 2.0f32, 0.0f32),
+                (1, LangPref::Tr, Lang::Tr, 1.0f32, 0.0f32),
+            ] {
+                write_reg_dword(REG_LANGUAGE, dword);
+                load_app_settings();
+                let cur_pref = STATE.lang_pref;
+                let cur_lang = STATE.lang;
+                assert_eq!(cur_pref, pref);
+                assert_eq!(cur_lang, lang);
+                assert!((STATE.anim_lang_col - exp_col).abs() < f32::EPSILON);
+                assert!((STATE.anim_lang_row - exp_row).abs() < f32::EPSILON);
+            }
 
             write_reg_dword(REG_CLOSE_TO_TRAY, 1);
             write_reg_dword(REG_KEEP_DISPLAY_ON, 1);
             write_reg_dword(REG_LANGUAGE, 0);
+            write_reg_dword(REG_THEME, 0);
             load_app_settings();
             let lp_sys = STATE.lang_pref;
-            let ltr_sys = STATE.lang_tr;
+            let l_sys = STATE.lang;
+            let tp_sys = STATE.theme_pref;
+            let is_sys = STATE.is_light_theme;
             assert!(STATE.close_to_tray);
             assert!(STATE.keep_display_on);
             assert_eq!(lp_sys, LangPref::System);
-            assert_eq!(ltr_sys, system_is_turkish());
+            assert_eq!(l_sys, system_detected_lang());
+            assert_eq!(tp_sys, ThemePref::System);
+            assert_eq!(is_sys, system_uses_light_theme());
             assert!((STATE.anim_close_opt - 0.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_theme_opt - 0.0).abs() < f32::EPSILON);
             assert!((STATE.anim_disp_toggle - 1.0).abs() < f32::EPSILON);
-            assert!((STATE.anim_lang_idx - 0.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_lang_col - 0.0).abs() < f32::EPSILON);
+            assert!((STATE.anim_lang_row - 0.0).abs() < f32::EPSILON);
         }
     }
 
